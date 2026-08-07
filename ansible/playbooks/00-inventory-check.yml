@@ -1,0 +1,24 @@
+---
+- name: KubeCloud infrastructure verification
+  hosts: kubernetes
+  gather_facts: true
+
+  tasks:
+
+    - name: Display node identity
+      ansible.builtin.debug:
+        msg:
+          - "Hostname: {{ ansible_hostname }}"
+          - "Distribution: {{ ansible_distribution }}"
+          - "Version: {{ ansible_distribution_version }}"
+          - "CPU: {{ ansible_processor_vcpus }}"
+          - "RAM MB: {{ ansible_memtotal_mb }}"
+          - "IP: {{ ansible_default_ipv4.address }}"
+
+    - name: Verify Kubernetes distribution assignment
+      ansible.builtin.debug:
+        msg: "Expected Kubernetes distribution: {{ kubernetes_distribution }}"
+
+    - name: Verify cluster role
+      ansible.builtin.debug:
+        msg: "Cluster role: {{ cluster_role }}"

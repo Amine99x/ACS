@@ -1,0 +1,19 @@
+---
+project_name: kubecloud-control-tower
+
+network:
+  subnet: 10.31.136.0/24
+  gateway: 10.31.136.254
+
+nodes:
+  management:
+    hostname: kubecloud-mgmt
+    ip: 10.31.136.150
+
+  development:
+    hostname: kubecloud-dev
+    ip: 10.31.136.151
+
+  production:
+    hostname: kubecloud-prod
+    ip: 10.31.136.152

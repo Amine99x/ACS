@@ -1,0 +1,3 @@
+---
+kubernetes_distribution: rke2
+cluster_role: management

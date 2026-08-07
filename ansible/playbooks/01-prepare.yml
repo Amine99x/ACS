@@ -1,0 +1,8 @@
+---
+- name: Prepare all KubeCloud Kubernetes nodes
+  hosts: kubernetes
+  become: true
+  gather_facts: true
+
+  roles:
+    - common

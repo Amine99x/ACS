@@ -1,0 +1,8 @@
+---
+- name: Install RKE2 management cluster
+  hosts: management
+  become: true
+  gather_facts: true
+
+  roles:
+    - rke2

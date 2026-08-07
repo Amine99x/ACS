@@ -1,0 +1,59 @@
+---
+- name: Create RKE2 configuration directory
+  ansible.builtin.file:
+    path: "{{ rke2_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download RKE2 installation script
+  ansible.builtin.get_url:
+    url: https://get.rke2.io
+    dest: "{{ rke2_install_script }}"
+    mode: "0755"
+
+- name: Install RKE2 server
+  ansible.builtin.command:
+    cmd: "{{ rke2_install_script }}"
+  environment:
+    INSTALL_RKE2_TYPE: "{{ rke2_type }}"
+    INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+  args:
+    creates: /usr/local/bin/rke2
+
+- name: Create RKE2 configuration
+  ansible.builtin.copy:
+    dest: "{{ rke2_config_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      write-kubeconfig-mode: "0644"
+  notify: Restart RKE2
+
+- name: Enable RKE2 server
+  ansible.builtin.systemd:
+    name: rke2-server
+    enabled: true
+    daemon_reload: true
+
+- name: Start RKE2 server
+  ansible.builtin.systemd:
+    name: rke2-server
+    state: started
+
+- name: Wait for RKE2 kubeconfig
+  ansible.builtin.wait_for:
+    path: "{{ rke2_kubeconfig }}"
+    timeout: 180
+
+- name: Verify RKE2 service
+  ansible.builtin.command:
+    cmd: systemctl is-active rke2-server
+  register: rke2_service_status
+  changed_when: false
+
+- name: Display RKE2 service status
+  ansible.builtin.debug:
+    msg: "RKE2 service status: {{ rke2_service_status.stdout }}"

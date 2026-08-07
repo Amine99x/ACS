@@ -1,0 +1,59 @@
+---
+- name: Download K3s installation script
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: "{{ k3s_install_script }}"
+    mode: "0755"
+
+- name: Check whether K3s service exists
+  ansible.builtin.stat:
+    path: /etc/systemd/system/k3s.service
+  register: k3s_service_file
+
+- name: Install K3s server
+  ansible.builtin.command:
+    cmd: "{{ k3s_install_script }}"
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+  when: not k3s_service_file.stat.exists
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Verify K3s service file exists
+  ansible.builtin.stat:
+    path: /etc/systemd/system/k3s.service
+  register: k3s_service
+
+- name: Fail if K3s service was not created
+  ansible.builtin.fail:
+    msg: >-
+      K3s binary exists but k3s.service was not created.
+      Check the K3s installer output and package dependencies.
+  when: not k3s_service.stat.exists
+
+- name: Enable K3s
+  ansible.builtin.systemd:
+    name: k3s
+    enabled: true
+
+- name: Start K3s
+  ansible.builtin.systemd:
+    name: k3s
+    state: started
+
+- name: Wait for K3s kubeconfig
+  ansible.builtin.wait_for:
+    path: /etc/rancher/k3s/k3s.yaml
+    timeout: 180
+
+- name: Verify K3s service
+  ansible.builtin.command:
+    cmd: systemctl is-active k3s
+  register: k3s_status
+  changed_when: false
+
+- name: Display K3s status
+  ansible.builtin.debug:
+    msg: "K3s service status: {{ k3s_status.stdout }}"

@@ -1,0 +1,8 @@
+---
+- name: Install K3s development cluster
+  hosts: development
+  become: true
+  gather_facts: true
+
+  roles:
+    - k3s

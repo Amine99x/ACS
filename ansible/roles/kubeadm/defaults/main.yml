@@ -1,0 +1,22 @@
+---
+kubernetes_major_minor: "1.33"
+
+kubernetes_repo:
+  name: kubernetes
+  description: Kubernetes
+  baseurl: "https://pkgs.k8s.io/core:/stable:/v1.33/rpm/"
+  enabled: true
+  gpgcheck: true
+  gpgkey: "https://pkgs.k8s.io/core:/stable:/v1.33/rpm/repodata/repomd.xml.key"
+
+containerd_repo: "https://download.docker.com/linux/rhel/docker-ce.repo"
+
+pod_network_cidr: "10.244.0.0/16"
+
+kubeadm_cri_socket: "unix:///run/containerd/containerd.sock"
+
+calico_manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/v3.30.3/manifests/calico.yaml"
+
+kubeconfig_path: "/etc/kubernetes/admin.conf"
+
+kubeconfig_user: "{{ ansible_user }}"

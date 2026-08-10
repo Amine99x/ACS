@@ -1,0 +1,222 @@
+---
+- name: Disable swap immediately
+  ansible.builtin.command:
+    cmd: swapoff -a
+  when: ansible_swaptotal_mb | int > 0
+  changed_when: true
+
+- name: Ensure swap stays disabled
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^(\s*[^#].*\s+swap\s+.*)$'
+    replace: '# \1'
+
+- name: Install required packages
+  ansible.builtin.dnf:
+    name:
+      - curl
+      - ca-certificates
+      - dnf-plugins-core
+      - iproute-tc
+      - socat
+      - conntrack
+      - ebtables
+    state: present
+
+- name: Disable firewalld for Kubernetes lab
+  ansible.builtin.systemd:
+    name: firewalld
+    state: stopped
+    enabled: false
+  failed_when: false
+
+# ---------------------------------------------------------
+# CONTAINERD
+# ---------------------------------------------------------
+
+- name: Add Docker CE repository
+  ansible.builtin.get_url:
+    url: "{{ containerd_repo }}"
+    dest: /etc/yum.repos.d/docker-ce.repo
+    mode: "0644"
+
+- name: Install containerd
+  ansible.builtin.dnf:
+    name: containerd.io
+    state: present
+
+- name: Create containerd configuration directory
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    mode: "0755"
+
+- name: Generate default containerd configuration
+  ansible.builtin.shell:
+    cmd: containerd config default > /etc/containerd/config.toml
+    creates: /etc/containerd/config.toml
+
+- name: Configure containerd to use systemd cgroups
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+
+- name: Ensure containerd CRI plugin is enabled
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: '^disabled_plugins\s*=\s*\[.*\]'
+    replace: 'disabled_plugins = []'
+
+- name: Enable and start containerd
+  ansible.builtin.systemd:
+    name: containerd
+    state: started
+    enabled: true
+    daemon_reload: true
+
+# ---------------------------------------------------------
+# KUBERNETES KERNEL CONFIGURATION
+# ---------------------------------------------------------
+
+- name: Load br_netfilter
+  community.general.modprobe:
+    name: br_netfilter
+    state: present
+
+- name: Load overlay
+  community.general.modprobe:
+    name: overlay
+    state: present
+
+- name: Configure Kubernetes sysctl
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-kubernetes.conf
+    mode: "0644"
+    content: |
+      net.bridge.bridge-nf-call-iptables = 1
+      net.bridge.bridge-nf-call-ip6tables = 1
+      net.ipv4.ip_forward = 1
+
+- name: Apply Kubernetes sysctl
+  ansible.builtin.command:
+    cmd: sysctl --system
+  changed_when: true
+
+# ---------------------------------------------------------
+# KUBERNETES PACKAGES
+# ---------------------------------------------------------
+
+- name: Configure Kubernetes repository
+  ansible.builtin.copy:
+    dest: /etc/yum.repos.d/kubernetes.repo
+    mode: "0644"
+    content: |
+      [kubernetes]
+      name=Kubernetes
+      baseurl={{ kubernetes_repo.baseurl }}
+      enabled=1
+      gpgcheck=1
+      gpgkey={{ kubernetes_repo.gpgkey }}
+      exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
+
+- name: Install kubelet kubeadm kubectl
+  ansible.builtin.dnf:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+    disable_excludes: kubernetes
+
+- name: Enable kubelet
+  ansible.builtin.systemd:
+    name: kubelet
+    enabled: true
+    daemon_reload: true
+
+# ---------------------------------------------------------
+# KUBEADM INITIALIZATION
+# ---------------------------------------------------------
+
+- name: Check whether Kubernetes is already initialized
+  ansible.builtin.stat:
+    path: /etc/kubernetes/admin.conf
+  register: kubeadm_initialized
+
+- name: Initialize Kubernetes control plane
+  ansible.builtin.command:
+    cmd: >
+      kubeadm init
+      --apiserver-advertise-address={{ ansible_host }}
+      --pod-network-cidr={{ pod_network_cidr }}
+      --cri-socket={{ kubeadm_cri_socket }}
+  when: not kubeadm_initialized.stat.exists
+  register: kubeadm_init
+  changed_when: true
+
+# ---------------------------------------------------------
+# KUBECONFIG
+# ---------------------------------------------------------
+
+- name: Create .kube directory for Ansible user
+  ansible.builtin.file:
+    path: "/home/{{ kubeconfig_user }}/.kube"
+    state: directory
+    owner: "{{ kubeconfig_user }}"
+    group: "{{ kubeconfig_user }}"
+    mode: "0700"
+
+- name: Copy admin kubeconfig
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ kubeconfig_user }}/.kube/config"
+    remote_src: true
+    owner: "{{ kubeconfig_user }}"
+    group: "{{ kubeconfig_user }}"
+    mode: "0600"
+
+# ---------------------------------------------------------
+# CALICO
+# ---------------------------------------------------------
+
+- name: Download Calico manifest
+  ansible.builtin.get_url:
+    url: "{{ calico_manifest_url }}"
+    dest: /tmp/calico.yaml
+    mode: "0644"
+
+- name: Install Calico
+  ansible.builtin.command:
+    cmd: kubectl apply -f /tmp/calico.yaml
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: calico_apply
+  changed_when: "'created' in calico_apply.stdout or 'configured' in calico_apply.stdout"
+
+# ---------------------------------------------------------
+# VERIFICATION
+# ---------------------------------------------------------
+
+- name: Wait for Kubernetes API
+  ansible.builtin.command:
+    cmd: kubectl get nodes
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: kubectl_nodes
+  retries: 30
+  delay: 10
+  until: kubectl_nodes.rc == 0
+  changed_when: false
+
+- name: Display Kubernetes nodes
+  ansible.builtin.command:
+    cmd: kubectl get nodes -o wide
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  register: nodes_output
+  changed_when: false
+
+- name: Display Kubernetes nodes
+  ansible.builtin.debug:
+    var: nodes_output.stdout

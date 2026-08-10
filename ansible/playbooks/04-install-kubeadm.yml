@@ -1,0 +1,7 @@
+---
+- name: Install kubeadm production-simulation cluster
+  hosts: production
+  become: true
+
+  roles:
+    - kubeadm

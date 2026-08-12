@@ -1,0 +1,10 @@
+---
+- name: Install Rancher on management cluster
+  hosts: management
+  become: true
+
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+
+  roles:
+    - rancher

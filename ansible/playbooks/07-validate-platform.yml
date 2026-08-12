@@ -1,0 +1,63 @@
+---
+- name: Validate KubeCloud platform
+  hosts: management
+  become: true
+
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "/etc/rancher/rke2/rke2.yaml"
+
+  tasks:
+
+    - name: Check management Kubernetes nodes
+      ansible.builtin.command:
+        cmd: kubectl get nodes -o wide
+      register: management_nodes
+      changed_when: false
+
+    - name: Display management cluster
+      ansible.builtin.debug:
+        var: management_nodes.stdout
+
+    - name: Check Rancher deployment
+      ansible.builtin.command:
+        cmd: kubectl get deployment rancher -n cattle-system
+      register: rancher_deployment
+      changed_when: false
+
+    - name: Display Rancher deployment
+      ansible.builtin.debug:
+        var: rancher_deployment.stdout
+
+    - name: Check Rancher clusters
+      ansible.builtin.command:
+        cmd: >
+          kubectl get clusters.management.cattle.io
+          -o custom-columns=NAME:.metadata.name,DISPLAY:.spec.displayName,DRIVER:.status.driver
+      register: rancher_clusters
+      changed_when: false
+
+    - name: Display Rancher clusters
+      ansible.builtin.debug:
+        var: rancher_clusters.stdout
+
+    - name: Check Fleet pods
+      ansible.builtin.command:
+        cmd: kubectl get pods -n cattle-fleet-system
+      register: fleet_pods
+      changed_when: false
+
+    - name: Display Fleet
+      ansible.builtin.debug:
+        var: fleet_pods.stdout
+
+    - name: Check cluster registrations
+      ansible.builtin.command:
+        cmd: kubectl get clusterregistrations -A -o wide
+      register: registrations
+      changed_when: false
+      failed_when: false
+
+    - name: Display registrations
+      ansible.builtin.debug:
+        var: registrations.stdout

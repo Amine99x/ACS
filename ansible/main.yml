@@ -1,0 +1,17 @@
+---
+rancher_url: "https://rancher.10.31.136.150.sslip.io"
+
+rancher_api_token: "4hcfnwlc9clgd27f67j6xz7pt5dnjhhkw7klwn5n9l87mqfnk2xhhb"
+
+rancher_kubeconfig: "/etc/rancher/rke2/rke2.yaml"
+
+kubectl_binary: "/usr/local/bin/kubectl"
+
+rancher_clusters:
+  - name: kubecloud-dev
+    host: kubecloud-dev
+    type: k3s
+
+  - name: kubecloud-prod
+    host: kubecloud-prod
+    type: kubeadm

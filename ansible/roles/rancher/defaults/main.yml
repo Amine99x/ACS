@@ -1,0 +1,20 @@
+rancher_version: "2.14.3"
+
+cert_manager_version: "v1.21.1"
+
+rancher_namespace: "cattle-system"
+cert_manager_namespace: "cert-manager"
+
+rancher_hostname: "rancher.10.31.136.150.sslip.io"
+
+rancher_replicas: 1
+
+rancher_bootstrap_password: "9870.ll"
+
+rancher_chart_repo: "https://releases.rancher.com/server-charts/stable"
+cert_manager_chart_repo: "https://charts.jetstack.io"
+
+helm_binary: "/usr/local/bin/helm"
+kubectl_binary: "/usr/local/bin/kubectl"
+
+rancher_kubeconfig: "/var/lib/rancher/rke2/server/cred/admin.kubeconfig"

@@ -1,0 +1,132 @@
+---
+- name: Check Helm is installed
+  ansible.builtin.command:
+    cmd: "{{ helm_binary }} version --short"
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+  register: helm_version
+  changed_when: false
+
+- name: Display Helm version
+  ansible.builtin.debug:
+    msg: "{{ helm_version.stdout }}"
+
+- name: Verify RKE2 kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ rancher_kubeconfig }}"
+  register: rancher_kubeconfig_stat
+
+- name: Fail if RKE2 kubeconfig is missing
+  ansible.builtin.fail:
+    msg: >-
+      RKE2 kubeconfig was not found at {{ rancher_kubeconfig }}.
+      Verify that the RKE2 management cluster is installed and running.
+  when: not rancher_kubeconfig_stat.stat.exists
+
+- name: Verify management Kubernetes API
+  ansible.builtin.command:
+    cmd: "{{ kubectl_binary }} get nodes"
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: management_nodes
+  changed_when: false
+
+- name: Display management cluster
+  ansible.builtin.debug:
+    var: management_nodes.stdout
+
+- name: Add Rancher Helm repository
+  kubernetes.core.helm_repository:
+    name: rancher-stable
+    repo_url: "{{ rancher_chart_repo }}"
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+
+- name: Add Jetstack Helm repository
+  kubernetes.core.helm_repository:
+    name: jetstack
+    repo_url: "{{ cert_manager_chart_repo }}"
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+
+- name: Update Helm repositories
+  ansible.builtin.command:
+    cmd: "{{ helm_binary }} repo update"
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+  changed_when: false
+
+- name: Install cert-manager
+  kubernetes.core.helm:
+    name: cert-manager
+    chart_ref: jetstack/cert-manager
+    chart_version: "{{ cert_manager_version }}"
+    release_namespace: "{{ cert_manager_namespace }}"
+    create_namespace: true
+    values:
+      crds:
+        enabled: true
+    wait: true
+    timeout: 10m
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+
+- name: Wait for cert-manager
+  ansible.builtin.command:
+    cmd: "{{ kubectl_binary }} get pods -n {{ cert_manager_namespace }}"
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: cert_manager_pods
+  retries: 30
+  delay: 10
+  until: cert_manager_pods.rc == 0
+  changed_when: false
+
+- name: Install Rancher
+  kubernetes.core.helm:
+    name: rancher
+    chart_ref: rancher-stable/rancher
+    chart_version: "{{ rancher_version }}"
+    release_namespace: "{{ rancher_namespace }}"
+    create_namespace: true
+    values:
+      hostname: "{{ rancher_hostname }}"
+      replicas: "{{ rancher_replicas }}"
+      bootstrapPassword: "{{ rancher_bootstrap_password }}"
+    wait: true
+    timeout: 15m
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+
+- name: Wait for Rancher deployment
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }} rollout status
+      deployment/rancher
+      -n {{ rancher_namespace }}
+      --timeout=10m
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  changed_when: false
+
+- name: Verify Rancher pod
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }} get pods
+      -n {{ rancher_namespace }}
+      -l app=rancher
+      -o wide
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: rancher_pods
+  changed_when: false
+
+- name: Display Rancher status
+  ansible.builtin.debug:
+    var: rancher_pods.stdout

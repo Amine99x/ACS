@@ -7,3 +7,5 @@ report_include_timestamp: true
 
 rancher_dev_cluster_name: "kubecloud-dev"
 rancher_prod_cluster_name: "kubecloud-prod"
+
+report_expected_fleet_clusters: 2

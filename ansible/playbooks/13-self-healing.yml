@@ -16,6 +16,14 @@
       ansible.builtin.include_role:
         name: drift_detection
 
+    - name: Capture initial drift state
+      ansible.builtin.set_fact:
+        initial_drift_detected: "{{ remediation_required | default(false) | bool }}"
+        initial_drift_label_mismatches: "{{ drift_label_mismatches | default([]) }}"
+        initial_drift_missing_clusters: "{{ drift_missing_clusters | default([]) }}"
+        initial_drift_unhealthy_clusters: "{{ drift_unhealthy_clusters | default([]) }}"
+        initial_drift_fleet_drift: "{{ drift_fleet_drift | default(false) | bool }}"
+
     - name: Active remediation
       ansible.builtin.include_role:
         name: remediation
@@ -23,6 +31,10 @@
     - name: Re-run drift detection after remediation
       ansible.builtin.include_role:
         name: drift_detection
+
+    - name: Capture final drift state
+      ansible.builtin.set_fact:
+        final_drift_detected: "{{ remediation_required | default(false) | bool }}"
 
     - name: Re-run health and compliance validation
       ansible.builtin.include_role:
@@ -42,7 +54,8 @@
           - "=============================================="
           - "       KUBECLOUD SELF-HEALING SUMMARY"
           - "=============================================="
-          - "Remediation performed : {{ remediation_performed | default(false) }}"
-          - "Final drift detected  : {{ remediation_required | default(false) }}"
-          - "Final compliance      : {{ health_score | default(0) }}%"
+          - "Initial drift detected : {{ initial_drift_detected }}"
+          - "Remediation performed  : {{ remediation_performed | default(false) }}"
+          - "Final drift detected   : {{ final_drift_detected }}"
+          - "Final compliance       : {{ health_score | default(0) }}%"
           - "=============================================="

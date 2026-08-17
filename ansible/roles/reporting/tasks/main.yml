@@ -13,6 +13,12 @@
     prod_health: "{{ 'HEALTHY' if health_prod_ok | bool else 'DRIFT DETECTED' }}"
     fleet_health: "{{ 'HEALTHY' if health_fleet_ok | bool else 'UNHEALTHY' }}"
 
+- name: Build remediation audit data
+  ansible.builtin.set_fact:
+    report_remediation:
+      performed: "{{ remediation_performed | default(false) | bool }}"
+      actions: "{{ remediation_actions | default([]) }}"
+
 - name: Generate KubeCloud platform report
   ansible.builtin.copy:
     dest: "{{ report_output_dir }}/{{ report_filename }}"
@@ -20,18 +26,40 @@
     content: |
       {
         "platform": "KubeCloud Control Tower",
-        "management": "{{ management_health }}",
-        "rancher": "{{ rancher_health }}",
-        "development": "{{ dev_health }}",
-        "production": "{{ prod_health }}",
-        "fleet": "{{ fleet_health }}",
-        "compliance_score": {{ health_score | int }},
-        "drift_detected": {{ remediation_required | default(false) | bool | lower }},
+        "generated_at": "{{ ansible_date_time.iso8601 }}",
+
+        "health": {
+          "management": "{{ management_health }}",
+          "rancher": "{{ rancher_health }}",
+          "development": "{{ dev_health }}",
+          "production": "{{ prod_health }}",
+          "fleet": "{{ fleet_health }}",
+          "operational_score": {{ health_score | int }}
+        },
+
+        "desired_state": {
+          "initial_drift_detected": {{ initial_drift_detected | default(false) | bool | lower }},
+          "final_drift_detected": {{ final_drift_detected | default(remediation_required | default(false)) | bool | lower }},
+
+          "initial_label_mismatches": {{ initial_drift_label_mismatches | default([]) | to_json }},
+          "missing_clusters": {{ initial_drift_missing_clusters | default([]) | to_json }},
+          "unhealthy_clusters": {{ initial_drift_unhealthy_clusters | default([]) | to_json }},
+          "fleet_drift": {{ initial_drift_fleet_drift | default(false) | bool | lower }}
+        },
+
+        "remediation": {{ report_remediation | to_json }},
+
         "managed_clusters": [
           "{{ rancher_dev_cluster_name }}",
           "{{ rancher_prod_cluster_name }}"
         ],
-        "fleet_clusters": {{ drift_fleet_count | default(0) | int }}
+
+        "fleet": {
+          "expected_clusters": {{ report_expected_fleet_clusters | int }},
+          "actual_clusters": {{ drift_fleet_count | int }}
+        },
+
+        "overall_status": "{{ 'HEALTHY' if (health_score | int == report_expected_score and not (final_drift_detected | default(false) | bool)) else 'DEGRADED' }}"
       }
 
 - name: Display generated report
@@ -46,6 +74,9 @@
       - "Development: {{ dev_health }}"
       - "Production : {{ prod_health }}"
       - "Fleet      : {{ fleet_health }}"
-      - "Score      : {{ health_score | int }}%"
-      - "Drift      : {{ remediation_required | default(false) | bool }}"
+      - "Health     : {{ health_score | int }}%"
+      - "Initial drift : {{ initial_drift_detected | default(false) }}"
+      - "Final drift   : {{ final_drift_detected | default(false) }}"
+      - "Remediation  : {{ remediation_performed | default(false) }}"
+      - "Overall      : {{ 'HEALTHY' if (health_score | int == report_expected_score and not (final_drift_detected | default(false) | bool)) else 'DEGRADED' }}"
       - "=============================================="

@@ -1,0 +1,13 @@
+---
+- name: KubeCloud Control Tower - Application Health
+  hosts: management
+  become: true
+
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+
+  vars:
+    kubectl_binary: "/usr/local/bin/kubectl"
+
+  roles:
+    - application_health

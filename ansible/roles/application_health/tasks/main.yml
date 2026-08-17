@@ -2,12 +2,10 @@
 - name: Check DEV NGINX deployment
   ansible.builtin.command:
     cmd: >-
-      {{ kubectl_binary }}
+      /usr/local/bin/k3s kubectl
       -n {{ application_namespace }}
       get deployment {{ application_name }}
       -o jsonpath='{.status.availableReplicas}'
-  environment:
-    KUBECONFIG: "{{ application_dev_kubeconfig }}"
   register: application_dev_available
   changed_when: false
   failed_when: false
@@ -16,7 +14,7 @@
 - name: Check PROD NGINX deployment
   ansible.builtin.command:
     cmd: >-
-      {{ kubectl_binary }}
+      kubectl
       -n {{ application_namespace }}
       get deployment {{ application_name }}
       -o jsonpath='{.status.availableReplicas}'

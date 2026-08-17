@@ -6,5 +6,17 @@ metadata:
 spec:
   repo: "https://github.com/Amine99x/ACS.git"
   branch: main
+
   paths:
     - fleet/applications
+
+  targets:
+    - name: development
+      clusterSelector:
+        matchLabels:
+          environment: development
+
+    - name: production
+      clusterSelector:
+        matchLabels:
+          environment: production

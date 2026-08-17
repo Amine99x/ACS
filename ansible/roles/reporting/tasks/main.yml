@@ -62,6 +62,12 @@
         "overall_status": "{{ 'HEALTHY' if (health_score | int == report_expected_score and not (final_drift_detected | default(false) | bool)) else 'DEGRADED' }}"
       }
 
+- name: Generate KubeCloud Prometheus metrics
+  ansible.builtin.template:
+    src: platform-health.prom.j2
+    dest: "{{ report_output_dir }}/platform-health.prom"
+    mode: "0644"
+
 - name: Display generated report
   ansible.builtin.debug:
     msg:
@@ -80,3 +86,4 @@
       - "Remediation  : {{ remediation_performed | default(false) }}"
       - "Overall      : {{ 'HEALTHY' if (health_score | int == report_expected_score and not (final_drift_detected | default(false) | bool)) else 'DEGRADED' }}"
       - "=============================================="
+

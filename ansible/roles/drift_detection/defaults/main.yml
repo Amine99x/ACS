@@ -1,4 +1,7 @@
 ---
+rancher_kubeconfig: "/etc/rancher/rke2/rke2.yaml"
+kubectl_binary: "/usr/local/bin/kubectl"
+
 drift_expected_clusters:
   - kubecloud-dev
   - kubecloud-prod
@@ -9,5 +12,7 @@ drift_expected_status: "True"
 
 drift_report_enabled: true
 
-# Safety: detection never performs remediation itself.
+drift_policy_file: "{{ playbook_dir }}/../policies/kubecloud-policy.yml"
+
+# Detection only. No remediation is performed here.
 remediation_dry_run: true

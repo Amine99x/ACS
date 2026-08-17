@@ -1,0 +1,197 @@
+---
+- name: KubeCloud Control Tower - Controlled Self-Healing Demonstration
+  hosts: management
+  become: true
+
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "/etc/rancher/rke2/rke2.yaml"
+
+  vars:
+    remediation_dry_run: false
+
+    rancher_kubeconfig: "/etc/rancher/rke2/rke2.yaml"
+    kubectl_binary: "/usr/local/bin/kubectl"
+
+    demo_cluster: "kubecloud-dev"
+    demo_cluster_management_name: "c-gldcs"
+    demo_label_key: "environment"
+    demo_expected_value: "development"
+
+  tasks:
+
+    - name: Display demonstration header
+      ansible.builtin.debug:
+        msg:
+          - "================================================"
+          - "     KUBECLOUD SELF-HEALING DEMONSTRATION"
+          - "================================================"
+          - "Target cluster : {{ demo_cluster }}"
+          - "Failure type   : Controlled label drift"
+          - "Expected label : {{ demo_label_key }}={{ demo_expected_value }}"
+          - "================================================"
+
+    - name: Baseline health validation
+      ansible.builtin.include_role:
+        name: health_check
+
+    - name: Display baseline status
+      ansible.builtin.debug:
+        msg:
+          - "BASELINE"
+          - "Management : {{ 'HEALTHY' if health_management_ok else 'UNHEALTHY' }}"
+          - "Rancher    : {{ 'HEALTHY' if health_rancher_ok else 'UNHEALTHY' }}"
+          - "DEV        : {{ 'HEALTHY' if health_dev_ok else 'UNHEALTHY' }}"
+          - "PROD       : {{ 'HEALTHY' if health_prod_ok else 'UNHEALTHY' }}"
+          - "Fleet      : {{ 'HEALTHY' if health_fleet_ok else 'UNHEALTHY' }}"
+          - "Compliance : {{ health_score }}%"
+
+    - name: Inject controlled drift
+      block:
+
+        - name: Remove DEV environment label
+          ansible.builtin.command:
+            argv:
+              - "{{ kubectl_binary }}"
+              - label
+              - cluster.management.cattle.io
+              - "{{ demo_cluster_management_name }}"
+              - "{{ demo_label_key }}-"
+          environment:
+            KUBECONFIG: "{{ rancher_kubeconfig }}"
+          register: demo_drift_injection
+          changed_when: true
+
+        - name: Display injected failure
+          ansible.builtin.debug:
+            msg:
+              - "================================================"
+              - "CONTROLLED FAILURE INJECTED"
+              - "================================================"
+              - "Cluster : {{ demo_cluster }}"
+              - "Removed: {{ demo_label_key }}={{ demo_expected_value }}"
+              - "================================================"
+
+        - name: Detect injected drift
+          ansible.builtin.include_role:
+            name: drift_detection
+
+        - name: Assert that drift was detected
+          ansible.builtin.assert:
+            that:
+              - remediation_required | bool
+              - drift_label_mismatches | length > 0
+            fail_msg: >-
+              The controlled failure was injected, but the Control Tower
+              did not detect the expected label drift.
+            success_msg: >-
+              Controlled drift successfully detected.
+
+        - name: Display detected drift
+          ansible.builtin.debug:
+            msg:
+              - "DRIFT DETECTED"
+              - "Cluster : {{ demo_cluster }}"
+              - "Expected: {{ demo_expected_value }}"
+              - "Actual  : {{ drift_label_mismatches[0].actual }}"
+              - "Action  : {{ remediation_action }}"
+
+        - name: Execute active remediation
+          ansible.builtin.include_role:
+            name: remediation
+
+        - name: Assert remediation was performed
+          ansible.builtin.assert:
+            that:
+              - remediation_performed | bool
+              - remediation_actions | length > 0
+            fail_msg: >-
+              Drift was detected but automatic remediation did not perform
+              the expected label restoration.
+            success_msg: >-
+              Automatic remediation successfully performed.
+
+        - name: Re-run drift detection
+          ansible.builtin.include_role:
+            name: drift_detection
+
+        - name: Assert final drift is cleared
+          ansible.builtin.assert:
+            that:
+              - not (remediation_required | bool)
+              - drift_label_mismatches | length == 0
+            fail_msg: >-
+              Remediation completed but the desired state is still not
+              reconciled.
+            success_msg: >-
+              Desired state successfully reconciled.
+
+        - name: Re-run health and compliance validation
+          ansible.builtin.include_role:
+            name: health_check
+
+        - name: Generate final platform report
+          ansible.builtin.include_role:
+            name: reporting
+
+        - name: Apply final health gate
+          ansible.builtin.include_role:
+            name: platform_validation
+
+        - name: Display successful self-healing demonstration
+          ansible.builtin.debug:
+            msg:
+              - "================================================"
+              - "       SELF-HEALING DEMONSTRATION SUCCESS"
+              - "================================================"
+              - "Initial failure       : INJECTED"
+              - "Drift detected        : TRUE"
+              - "Remediation performed : {{ remediation_performed }}"
+              - "Final drift           : FALSE"
+              - "Final compliance      : {{ health_score }}%"
+              - "Platform status       : HEALTHY"
+              - "================================================"
+
+      rescue:
+
+        - name: Emergency restore of DEV environment label
+          ansible.builtin.command:
+            argv:
+              - "{{ kubectl_binary }}"
+              - label
+              - cluster.management.cattle.io
+              - "{{ demo_cluster_management_name }}"
+              - "{{ demo_label_key }}={{ demo_expected_value }}"
+              - "--overwrite"
+          environment:
+            KUBECONFIG: "{{ rancher_kubeconfig }}"
+          changed_when: true
+
+        - name: Report demonstration failure
+          ansible.builtin.fail:
+            msg: >-
+              The controlled self-healing demonstration failed.
+              The DEV desired label was restored by the safety recovery step.
+
+    - name: Final safety verification
+      ansible.builtin.command:
+        cmd: >-
+          {{ kubectl_binary }}
+          get cluster.management.cattle.io
+          {{ demo_cluster_management_name }}
+          -o jsonpath='{.metadata.labels.environment}'
+      environment:
+        KUBECONFIG: "{{ rancher_kubeconfig }}"
+      register: final_demo_label
+      changed_when: false
+
+    - name: Assert DEV environment label is restored
+      ansible.builtin.assert:
+        that:
+          - final_demo_label.stdout == demo_expected_value
+        fail_msg: >-
+          SAFETY CHECK FAILED:
+          kubecloud-dev environment label is not '{{ demo_expected_value }}'.
+        success_msg: >-
+          Safety check passed:
+          kubecloud-dev environment={{ demo_expected_value }}.

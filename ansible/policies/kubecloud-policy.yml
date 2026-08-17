@@ -1,12 +1,19 @@
 ---
 kubecloud_policy:
   clusters:
+
     kubecloud-dev:
       managed: true
       fleet: true
       monitoring: true
+      labels:
+        environment: development
+        distribution: k3s
 
     kubecloud-prod:
       managed: true
       fleet: true
       monitoring: true
+      labels:
+        environment: production
+        distribution: kubeadm

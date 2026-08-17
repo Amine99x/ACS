@@ -1,0 +1,74 @@
+---
+- name: KubeCloud Control Tower - Final Unified Validation
+  hosts: management
+  become: true
+
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "/etc/rancher/rke2/rke2.yaml"
+
+  tasks:
+
+    - name: Validate cluster and platform health
+      ansible.builtin.include_role:
+        name: health_check
+
+    - name: Validate desired-state drift
+      ansible.builtin.include_role:
+        name: drift_detection
+
+    - name: Validate downstream applications
+      ansible.builtin.include_role:
+        name: application_health
+
+    - name: Calculate Control Tower final score
+      ansible.builtin.set_fact:
+        control_tower_score: >-
+          {{
+            (
+              ((health_score | int) * 4)
+              +
+              (application_health_score | int)
+            ) // 5
+          }}
+
+    - name: Determine final platform status
+      ansible.builtin.set_fact:
+        control_tower_healthy: >-
+          {{
+            (health_score | int) == 100
+            and (application_health_score | int) == 100
+            and not (remediation_required | default(false) | bool)
+          }}
+
+    - name: Display unified Control Tower status
+      ansible.builtin.debug:
+        msg:
+          - "================================================"
+          - "       KUBECLOUD CONTROL TOWER"
+          - "       FINAL PLATFORM VALIDATION"
+          - "================================================"
+          - "Management health : {{ 'HEALTHY' if health_management_ok else 'UNHEALTHY' }}"
+          - "Rancher health    : {{ 'HEALTHY' if health_rancher_ok else 'UNHEALTHY' }}"
+          - "DEV cluster       : {{ 'HEALTHY' if health_dev_ok else 'UNHEALTHY' }}"
+          - "PROD cluster      : {{ 'HEALTHY' if health_prod_ok else 'UNHEALTHY' }}"
+          - "Fleet             : {{ 'HEALTHY' if health_fleet_ok else 'UNHEALTHY' }}"
+          - "Policy drift      : {{ 'DETECTED' if remediation_required | default(false) else 'NONE' }}"
+          - "DEV application   : {{ 'HEALTHY' if application_dev_healthy else 'DEGRADED' }}"
+          - "PROD application  : {{ 'HEALTHY' if application_prod_healthy else 'DEGRADED' }}"
+          - "Platform score    : {{ health_score }}%"
+          - "Application score : {{ application_health_score }}%"
+          - "FINAL SCORE       : {{ control_tower_score }}%"
+          - "FINAL STATUS      : {{ 'HEALTHY' if control_tower_healthy else 'DEGRADED' }}"
+          - "================================================"
+
+    - name: Apply final Control Tower gate
+      ansible.builtin.assert:
+        that:
+          - control_tower_healthy
+        fail_msg: >-
+          KubeCloud Control Tower FAILED final validation.
+          Final score: {{ control_tower_score }}%.
+        success_msg: >-
+          KubeCloud Control Tower PASSED final validation.
+          Final score: {{ control_tower_score }}%.

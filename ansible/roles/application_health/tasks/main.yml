@@ -1,44 +1,78 @@
 ---
 - name: Check DEV NGINX deployment
   ansible.builtin.command:
-    cmd: >-
-      /usr/local/bin/k3s kubectl
-      -n {{ application_namespace }}
-      get deployment {{ application_name }}
-      -o jsonpath='{.status.availableReplicas}'
+    argv:
+      - /usr/local/bin/k3s
+      - kubectl
+      - -n
+      - "{{ application_namespace }}"
+      - get
+      - deployment
+      - "{{ application_name }}"
+      - -o
+      - jsonpath={.status.availableReplicas}
+  environment:
+    KUBECONFIG: "/etc/rancher/k3s/k3s.yaml"
   register: application_dev_available
   changed_when: false
   failed_when: false
   delegate_to: kubecloud-dev
+  become: true
 
 - name: Check PROD NGINX deployment
   ansible.builtin.command:
-    cmd: >-
-      kubectl
-      -n {{ application_namespace }}
-      get deployment {{ application_name }}
-      -o jsonpath='{.status.availableReplicas}'
+    argv:
+      - kubectl
+      - -n
+      - "{{ application_namespace }}"
+      - get
+      - deployment
+      - "{{ application_name }}"
+      - -o
+      - jsonpath={.status.availableReplicas}
   environment:
-    KUBECONFIG: "{{ application_prod_kubeconfig }}"
+    KUBECONFIG: "/etc/kubernetes/admin.conf"
   register: application_prod_available
   changed_when: false
   failed_when: false
   delegate_to: kubecloud-prod
+  become: true
+
+- name: Display raw application check results
+  ansible.builtin.debug:
+    msg:
+      - "DEV rc     : {{ application_dev_available.rc }}"
+      - "DEV stdout : '{{ application_dev_available.stdout | default('') }}'"
+      - "DEV stderr : '{{ application_dev_available.stderr | default('') }}'"
+      - "PROD rc     : {{ application_prod_available.rc }}"
+      - "PROD stdout : '{{ application_prod_available.stdout | default('') }}'"
+      - "PROD stderr : '{{ application_prod_available.stderr | default('') }}'"
 
 - name: Determine application health
   ansible.builtin.set_fact:
     application_dev_healthy: >-
       {{
         application_dev_available.rc == 0 and
-        (application_dev_available.stdout | default('0') | int)
-        >= application_expected_replicas
+        (application_dev_available.stdout | default('0') | trim | int)
+        >= (application_expected_replicas | int)
       }}
 
     application_prod_healthy: >-
       {{
         application_prod_available.rc == 0 and
-        (application_prod_available.stdout | default('0') | int)
-        >= application_expected_replicas
+        (application_prod_available.stdout | default('0') | trim | int)
+        >= (application_expected_replicas | int)
+      }}
+
+- name: Calculate application health score
+  ansible.builtin.set_fact:
+    application_health_score: >-
+      {{
+        100
+        if application_dev_healthy and application_prod_healthy
+        else 50
+        if application_dev_healthy or application_prod_healthy
+        else 0
       }}
 
 - name: Display application health
@@ -47,8 +81,9 @@
       - "=============================================="
       - "       KUBECLOUD APPLICATION HEALTH"
       - "=============================================="
-      - "DEV NGINX  : {{ application_dev_available.stdout | default('0') }}/{{ application_expected_replicas }}"
-      - "PROD NGINX : {{ application_prod_available.stdout | default('0') }}/{{ application_expected_replicas }}"
+      - "DEV NGINX  : {{ application_dev_available.stdout | default('0') | trim }}/{{ application_expected_replicas }}"
+      - "PROD NGINX : {{ application_prod_available.stdout | default('0') | trim }}/{{ application_expected_replicas }}"
       - "DEV        : {{ 'HEALTHY' if application_dev_healthy else 'DEGRADED' }}"
       - "PROD       : {{ 'HEALTHY' if application_prod_healthy else 'DEGRADED' }}"
+      - "APP SCORE  : {{ application_health_score }}%"
       - "=============================================="

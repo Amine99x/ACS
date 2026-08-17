@@ -1,0 +1,25 @@
+# KubeCloud Control Tower platform metrics
+
+kubecloud_compliance_score {{ health_score | int }}
+
+kubecloud_drift_detected {{ 1 if (final_drift_detected | default(false) | bool) else 0 }}
+
+kubecloud_initial_drift_detected {{ 1 if (initial_drift_detected | default(false) | bool) else 0 }}
+
+kubecloud_remediation_performed {{ 1 if (remediation_performed | default(false) | bool) else 0 }}
+
+kubecloud_management_health {{ 1 if health_management_ok | bool else 0 }}
+
+kubecloud_rancher_health {{ 1 if health_rancher_ok | bool else 0 }}
+
+kubecloud_dev_health {{ 1 if health_dev_ok | bool else 0 }}
+
+kubecloud_prod_health {{ 1 if health_prod_ok | bool else 0 }}
+
+kubecloud_fleet_health {{ 1 if health_fleet_ok | bool else 0 }}
+
+kubecloud_fleet_expected_clusters {{ report_expected_fleet_clusters | int }}
+
+kubecloud_fleet_actual_clusters {{ drift_fleet_count | int }}
+
+kubecloud_platform_healthy {{ 1 if (health_score | int == report_expected_score and not (final_drift_detected | default(false) | bool)) else 0 }}

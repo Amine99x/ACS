@@ -1,4 +1,9 @@
 ---
+- name: Load KubeCloud desired-state policy
+  ansible.builtin.include_vars:
+    file: "{{ drift_policy_file }}"
+    name: kubecloud_desired_policy
+
 - name: Query Rancher managed clusters
   ansible.builtin.command:
     cmd: >-
@@ -38,7 +43,8 @@
               | list
               | first
               | default('Unknown')
-            )
+            ),
+            'labels': item.metadata.labels | default({})
           }
         })
       }}
@@ -68,6 +74,90 @@
     - drift_cluster_map[item].connected != drift_expected_status
       or drift_cluster_map[item].ready != drift_expected_status
 
+# ------------------------------------------------------------
+# Desired-state label comparison
+# ------------------------------------------------------------
+
+- name: Initialize label drift list
+  ansible.builtin.set_fact:
+    drift_label_mismatches: []
+
+- name: Compare development cluster environment label
+  ansible.builtin.set_fact:
+    drift_label_mismatches: >-
+      {{
+        drift_label_mismatches + [{
+          'cluster': 'kubecloud-dev',
+          'key': 'environment',
+          'expected': kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-dev'].labels.environment,
+          'actual': drift_cluster_map['kubecloud-dev'].labels.environment | default('MISSING')
+        }]
+      }}
+  when:
+    - "'kubecloud-dev' in drift_cluster_map"
+    - >
+      (drift_cluster_map['kubecloud-dev'].labels.environment | default('MISSING'))
+      !=
+      kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-dev'].labels.environment
+
+- name: Compare development cluster distribution label
+  ansible.builtin.set_fact:
+    drift_label_mismatches: >-
+      {{
+        drift_label_mismatches + [{
+          'cluster': 'kubecloud-dev',
+          'key': 'distribution',
+          'expected': kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-dev'].labels.distribution,
+          'actual': drift_cluster_map['kubecloud-dev'].labels.distribution | default('MISSING')
+        }]
+      }}
+  when:
+    - "'kubecloud-dev' in drift_cluster_map"
+    - >
+      (drift_cluster_map['kubecloud-dev'].labels.distribution | default('MISSING'))
+      !=
+      kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-dev'].labels.distribution
+
+- name: Compare production cluster environment label
+  ansible.builtin.set_fact:
+    drift_label_mismatches: >-
+      {{
+        drift_label_mismatches + [{
+          'cluster': 'kubecloud-prod',
+          'key': 'environment',
+          'expected': kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-prod'].labels.environment,
+          'actual': drift_cluster_map['kubecloud-prod'].labels.environment | default('MISSING')
+        }]
+      }}
+  when:
+    - "'kubecloud-prod' in drift_cluster_map"
+    - >
+      (drift_cluster_map['kubecloud-prod'].labels.environment | default('MISSING'))
+      !=
+      kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-prod'].labels.environment
+
+- name: Compare production cluster distribution label
+  ansible.builtin.set_fact:
+    drift_label_mismatches: >-
+      {{
+        drift_label_mismatches + [{
+          'cluster': 'kubecloud-prod',
+          'key': 'distribution',
+          'expected': kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-prod'].labels.distribution,
+          'actual': drift_cluster_map['kubecloud-prod'].labels.distribution | default('MISSING')
+        }]
+      }}
+  when:
+    - "'kubecloud-prod' in drift_cluster_map"
+    - >
+      (drift_cluster_map['kubecloud-prod'].labels.distribution | default('MISSING'))
+      !=
+      kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-prod'].labels.distribution
+
+# ------------------------------------------------------------
+# Fleet
+# ------------------------------------------------------------
+
 - name: Query Fleet clusters
   ansible.builtin.command:
     cmd: >-
@@ -96,6 +186,10 @@
         != (drift_expected_fleet_clusters | int)
       }}
 
+# ------------------------------------------------------------
+# Final decision
+# ------------------------------------------------------------
+
 - name: Determine whether remediation is required
   ansible.builtin.set_fact:
     remediation_required: >-
@@ -103,6 +197,8 @@
         (drift_missing_clusters | length > 0)
         or
         (drift_unhealthy_clusters | length > 0)
+        or
+        (drift_label_mismatches | length > 0)
         or
         (drift_fleet_drift | bool)
       }}
@@ -113,7 +209,7 @@
       {{
         'NONE'
         if not remediation_required
-        else 'INVESTIGATE_AND_RECONCILE'
+        else 'RECONCILE_DESIRED_STATE'
       }}
 
 - name: Display drift detection report
@@ -126,11 +222,17 @@
       - "DETECTED CLUSTERS : {{ drift_cluster_map.keys() | list | join(', ') }}"
       - "MISSING CLUSTERS  : {{ drift_missing_clusters | join(', ') if drift_missing_clusters | length > 0 else 'NONE' }}"
       - "UNHEALTHY CLUSTERS: {{ drift_unhealthy_clusters | join(', ') if drift_unhealthy_clusters | length > 0 else 'NONE' }}"
+      - "LABEL DRIFT       : {{ drift_label_mismatches | length > 0 }}"
       - "FLEET CLUSTERS    : {{ drift_fleet_count }}"
       - "EXPECTED FLEET    : {{ drift_expected_fleet_clusters }}"
       - "FLEET DRIFT       : {{ drift_fleet_drift }}"
       - "REMEDIATION REQ.  : {{ remediation_required }}"
       - "=============================================="
+
+- name: Display label drift details
+  ansible.builtin.debug:
+    var: drift_label_mismatches
+  when: drift_label_mismatches | length > 0
 
 - name: Display remediation action
   ansible.builtin.debug:

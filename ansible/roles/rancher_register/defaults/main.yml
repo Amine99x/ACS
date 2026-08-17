@@ -1,0 +1,16 @@
+---
+rancher_namespace: "cattle-system"
+
+rancher_kubeconfig: "/etc/rancher/rke2/rke2.yaml"
+
+kubectl_binary: "/usr/local/bin/kubectl"
+
+rancher_api_url: "https://rancher.10.31.136.150.sslip.io"
+
+rancher_dev_cluster_name: "kubecloud-dev"
+
+rancher_prod_cluster_name: "kubecloud-prod"
+
+rancher_registration_timeout: 600
+
+fleet_check_interval: 10

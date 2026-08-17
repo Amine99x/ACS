@@ -1,0 +1,28 @@
+# Ansible secrets
+**/vault.yml
+**/*vault*.yml
+
+# Ansible temporary files
+*.retry
+.retry/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Temporary editor/backup files
+*.~
+*.broken-backup
+*.accidental-backup
+ansible.accidental-backup/
+*.backup
+
+# Editor backup files
+*~

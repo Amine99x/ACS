@@ -1,0 +1,10 @@
+- name: Fail if platform health is below 100%
+  ansible.builtin.assert:
+    that:
+      - health_score | int == 100
+    fail_msg: >-
+      KubeCloud platform health gate FAILED.
+      Compliance score: {{ health_score }}%.
+    success_msg: >-
+      KubeCloud platform health gate PASSED.
+      Compliance score: {{ health_score }}%.

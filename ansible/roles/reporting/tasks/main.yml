@@ -1,0 +1,51 @@
+---
+- name: Create KubeCloud report directory
+  ansible.builtin.file:
+    path: "{{ report_output_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Build report health labels
+  ansible.builtin.set_fact:
+    management_health: "{{ 'HEALTHY' if health_management_ok | bool else 'UNHEALTHY' }}"
+    rancher_health: "{{ 'HEALTHY' if health_rancher_ok | bool else 'UNHEALTHY' }}"
+    dev_health: "{{ 'HEALTHY' if health_dev_ok | bool else 'DRIFT DETECTED' }}"
+    prod_health: "{{ 'HEALTHY' if health_prod_ok | bool else 'DRIFT DETECTED' }}"
+    fleet_health: "{{ 'HEALTHY' if health_fleet_ok | bool else 'UNHEALTHY' }}"
+
+- name: Generate KubeCloud platform report
+  ansible.builtin.copy:
+    dest: "{{ report_output_dir }}/{{ report_filename }}"
+    mode: "0644"
+    content: |
+      {
+        "platform": "KubeCloud Control Tower",
+        "management": "{{ management_health }}",
+        "rancher": "{{ rancher_health }}",
+        "development": "{{ dev_health }}",
+        "production": "{{ prod_health }}",
+        "fleet": "{{ fleet_health }}",
+        "compliance_score": {{ health_score | int }},
+        "drift_detected": {{ remediation_required | default(false) | bool | lower }},
+        "managed_clusters": [
+          "{{ rancher_dev_cluster_name }}",
+          "{{ rancher_prod_cluster_name }}"
+        ],
+        "fleet_clusters": {{ drift_fleet_count | default(0) | int }}
+      }
+
+- name: Display generated report
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "       KUBECLOUD PLATFORM REPORT"
+      - "=============================================="
+      - "Report : {{ report_output_dir }}/{{ report_filename }}"
+      - "Management : {{ management_health }}"
+      - "Rancher    : {{ rancher_health }}"
+      - "Development: {{ dev_health }}"
+      - "Production : {{ prod_health }}"
+      - "Fleet      : {{ fleet_health }}"
+      - "Score      : {{ health_score | int }}%"
+      - "Drift      : {{ remediation_required | default(false) | bool }}"
+      - "=============================================="

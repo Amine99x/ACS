@@ -1,0 +1,9 @@
+---
+remediation_enabled: true
+remediation_dry_run: true
+
+rancher_kubeconfig: "/etc/rancher/rke2/rke2.yaml"
+kubectl_binary: "/usr/local/bin/kubectl"
+
+rancher_dev_cluster_name: "kubecloud-dev"
+rancher_prod_cluster_name: "kubecloud-prod"

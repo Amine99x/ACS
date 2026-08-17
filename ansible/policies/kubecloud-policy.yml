@@ -1,0 +1,12 @@
+---
+kubecloud_policy:
+  clusters:
+    kubecloud-dev:
+      managed: true
+      fleet: true
+      monitoring: true
+
+    kubecloud-prod:
+      managed: true
+      fleet: true
+      monitoring: true

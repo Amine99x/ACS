@@ -1,0 +1,13 @@
+---
+- name: Generate KubeCloud platform report
+  hosts: management
+  become: true
+
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "/etc/rancher/rke2/rke2.yaml"
+
+  roles:
+    - health_check
+    - drift_detection
+    - reporting

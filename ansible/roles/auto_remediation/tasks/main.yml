@@ -1,0 +1,63 @@
+---
+- name: Check management RKE2 service
+  ansible.builtin.command:
+    cmd: systemctl is-active rke2-server
+  register: rke2_status
+  changed_when: false
+  failed_when: false
+
+- name: Remediate management RKE2 service
+  ansible.builtin.systemd:
+    name: rke2-server
+    state: started
+    enabled: true
+  when:
+    - auto_remediation_enabled | bool
+    - rke2_status.stdout != "active"
+
+- name: Check Rancher deployment
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      -n {{ rancher_namespace }}
+      get deployment rancher
+      -o jsonpath='{.status.availableReplicas}'
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: rancher_available
+  changed_when: false
+  failed_when: false
+
+- name: Remediate Rancher deployment
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      -n {{ rancher_namespace }}
+      rollout restart deployment/rancher
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  when:
+    - auto_remediation_enabled | bool
+    - rancher_available.stdout | default("0") | int < 1
+
+- name: Wait for Rancher deployment
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      -n {{ rancher_namespace }}
+      rollout status deployment/rancher
+      --timeout=180s
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  changed_when: false
+
+- name: Display remediation result
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "       KUBECLOUD AUTO REMEDIATION"
+      - "=============================================="
+      - "RKE2 STATUS : {{ rke2_status.stdout | default('unknown') }}"
+      - "RANCHER    : {{ rancher_available.stdout | default('unknown') }} available"
+      - "REMEDIATION: {{ 'ENABLED' if auto_remediation_enabled else 'DISABLED' }}"
+      - "=============================================="

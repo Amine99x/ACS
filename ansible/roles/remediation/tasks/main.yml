@@ -1,0 +1,78 @@
+---
+- name: Query Rancher managed clusters
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      get clusters.management.cattle.io
+      -o json
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: rancher_clusters_raw
+  changed_when: false
+
+- name: Parse Rancher clusters
+  ansible.builtin.set_fact:
+    rancher_clusters: "{{ rancher_clusters_raw.stdout | from_json }}"
+
+- name: Build cluster health state
+  ansible.builtin.set_fact:
+    remediation_clusters: >-
+      {{
+        remediation_clusters | default({}) |
+        combine({
+          item.spec.displayName: {
+            'name': item.metadata.name,
+            'connected': (
+              item.status.conditions
+              | selectattr('type', 'equalto', 'Connected')
+              | map(attribute='status')
+              | list
+              | first
+              | default('Unknown')
+            ),
+            'ready': (
+              item.status.conditions
+              | selectattr('type', 'equalto', 'Ready')
+              | map(attribute='status')
+              | list
+              | first
+              | default('Unknown')
+            )
+          }
+        })
+      }}
+  loop: "{{ rancher_clusters['items'] }}"
+  loop_control:
+    label: "{{ item.spec.displayName | default(item.metadata.name) }}"
+
+- name: Display current platform state
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "       KUBECLOUD REMEDIATION ENGINE"
+      - "=============================================="
+      - "DEV  connected : {{ remediation_clusters[rancher_dev_cluster_name].connected }}"
+      - "DEV  ready     : {{ remediation_clusters[rancher_dev_cluster_name].ready }}"
+      - "PROD connected : {{ remediation_clusters[rancher_prod_cluster_name].connected }}"
+      - "PROD ready     : {{ remediation_clusters[rancher_prod_cluster_name].ready }}"
+      - "=============================================="
+
+- name: Determine whether remediation is required
+  ansible.builtin.set_fact:
+    remediation_required: >-
+      {{
+        remediation_clusters[rancher_dev_cluster_name].ready != "True"
+        or
+        remediation_clusters[rancher_prod_cluster_name].ready != "True"
+      }}
+
+- name: Display remediation decision
+  ansible.builtin.debug:
+    msg: >-
+      REMEDIATION REQUIRED: {{ remediation_required }}
+
+- name: Stop when platform is healthy
+  ansible.builtin.debug:
+    msg: "Platform is healthy. No remediation action required."
+  when:
+    - not remediation_required

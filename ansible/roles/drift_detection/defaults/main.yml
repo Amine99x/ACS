@@ -1,0 +1,13 @@
+---
+drift_expected_clusters:
+  - kubecloud-dev
+  - kubecloud-prod
+
+drift_expected_fleet_clusters: 2
+
+drift_expected_status: "True"
+
+drift_report_enabled: true
+
+# Safety: detection never performs remediation itself.
+remediation_dry_run: true

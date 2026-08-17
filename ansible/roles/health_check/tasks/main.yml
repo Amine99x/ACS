@@ -1,0 +1,175 @@
+---
+- name: Check management Kubernetes nodes
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      get nodes
+      --no-headers
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: health_management_nodes
+  changed_when: false
+
+- name: Determine management cluster health
+  ansible.builtin.set_fact:
+    health_management_ok: >-
+      {{
+        health_management_nodes.rc == 0 and
+        health_management_nodes.stdout_lines | length > 0 and
+        (
+          health_management_nodes.stdout_lines
+          | select('search', ' Ready ')
+          | list
+          | length
+        ) == (health_management_nodes.stdout_lines | length)
+      }}
+
+- name: Check Rancher deployment
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      -n cattle-system
+      get deployment rancher
+      -o jsonpath='{.status.availableReplicas}'
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: health_rancher
+  changed_when: false
+  failed_when: false
+
+- name: Determine Rancher health
+  ansible.builtin.set_fact:
+    health_rancher_ok: >-
+      {{
+        health_rancher.rc == 0 and
+        (health_rancher.stdout | int) >= 1
+      }}
+
+- name: Query Rancher managed clusters
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      get clusters.management.cattle.io
+      -o json
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: health_rancher_clusters_raw
+  changed_when: false
+
+- name: Parse Rancher managed clusters
+  ansible.builtin.set_fact:
+    health_rancher_clusters: "{{ health_rancher_clusters_raw.stdout | from_json }}"
+
+- name: Build health cluster lookup
+  ansible.builtin.set_fact:
+    health_cluster_lookup: >-
+      {{
+        health_cluster_lookup | default({}) |
+        combine({
+          item.spec.displayName: {
+            'name': item.metadata.name,
+            'connected': (
+              item.status.conditions
+              | selectattr('type', 'equalto', 'Connected')
+              | map(attribute='status')
+              | list
+              | first
+              | default('Unknown')
+            ),
+            'ready': (
+              item.status.conditions
+              | selectattr('type', 'equalto', 'Ready')
+              | map(attribute='status')
+              | list
+              | first
+              | default('Unknown')
+            )
+          }
+        })
+      }}
+  loop: "{{ health_rancher_clusters['items'] }}"
+  loop_control:
+    label: "{{ item.spec.displayName | default(item.metadata.name) }}"
+
+- name: Check DEV Rancher status
+  ansible.builtin.set_fact:
+    health_dev_ok: >-
+      {{
+        health_cluster_lookup[rancher_dev_cluster_name] is defined and
+        health_cluster_lookup[rancher_dev_cluster_name].connected == "True" and
+        health_cluster_lookup[rancher_dev_cluster_name].ready == "True"
+      }}
+
+- name: Check PROD Rancher status
+  ansible.builtin.set_fact:
+    health_prod_ok: >-
+      {{
+        health_cluster_lookup[rancher_prod_cluster_name] is defined and
+        health_cluster_lookup[rancher_prod_cluster_name].connected == "True" and
+        health_cluster_lookup[rancher_prod_cluster_name].ready == "True"
+      }}
+
+- name: Query Fleet downstream clusters
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      -n fleet-default
+      get clusters.fleet.cattle.io
+      -o json
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: health_fleet_raw
+  changed_when: false
+
+- name: Parse Fleet clusters
+  ansible.builtin.set_fact:
+    health_fleet_data: "{{ health_fleet_raw.stdout | from_json }}"
+
+- name: Determine Fleet health
+  ansible.builtin.set_fact:
+    health_fleet_ok: >-
+      {{
+        health_fleet_raw.rc == 0 and
+        (health_fleet_data['items'] | length) >= health_expected_fleet_clusters
+      }}
+
+- name: Calculate platform compliance score
+  ansible.builtin.set_fact:
+    health_score: >-
+      {{
+        (health_score_management if health_management_ok else 0)
+        +
+        (health_score_rancher if health_rancher_ok else 0)
+        +
+        (health_score_dev if health_dev_ok else 0)
+        +
+        (health_score_prod if health_prod_ok else 0)
+        +
+        (health_score_fleet if health_fleet_ok else 0)
+      }}
+
+- name: Display KubeCloud Control Tower health
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "       KUBECLOUD CONTROL TOWER"
+      - "=============================================="
+      - "MANAGEMENT : {{ 'HEALTHY' if health_management_ok else 'UNHEALTHY' }}"
+      - "RANCHER    : {{ 'HEALTHY' if health_rancher_ok else 'UNHEALTHY' }}"
+      - "DEV        : {{ 'HEALTHY' if health_dev_ok else 'DRIFT DETECTED' }}"
+      - "PROD       : {{ 'HEALTHY' if health_prod_ok else 'DRIFT DETECTED' }}"
+      - "FLEET      : {{ 'HEALTHY' if health_fleet_ok else 'UNHEALTHY' }}"
+      - "----------------------------------------------"
+      - "COMPLIANCE SCORE : {{ health_score }}%"
+      - "=============================================="
+
+- name: Fail if platform is not fully healthy
+  ansible.builtin.assert:
+    that:
+      - health_score | int == 100
+    fail_msg: >-
+      KubeCloud platform health gate FAILED.
+      Compliance score: {{ health_score }}%.
+    success_msg: >-
+      KubeCloud platform health gate PASSED.
+      Compliance score: {{ health_score }}%.

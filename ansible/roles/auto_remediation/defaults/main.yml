@@ -1,0 +1,7 @@
+---
+rancher_kubeconfig: "/etc/rancher/rke2/rke2.yaml"
+kubectl_binary: "/usr/local/bin/kubectl"
+
+rancher_namespace: "cattle-system"
+
+auto_remediation_enabled: true

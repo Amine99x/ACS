@@ -1,0 +1,16 @@
+---
+rancher_kubeconfig: "/etc/rancher/rke2/rke2.yaml"
+kubectl_binary: "/usr/local/bin/kubectl"
+
+rancher_namespace: "cattle-system"
+
+rancher_dev_cluster_name: "kubecloud-dev"
+rancher_prod_cluster_name: "kubecloud-prod"
+
+health_expected_fleet_clusters: 2
+
+health_score_management: 20
+health_score_rancher: 20
+health_score_dev: 20
+health_score_prod: 20
+health_score_fleet: 20

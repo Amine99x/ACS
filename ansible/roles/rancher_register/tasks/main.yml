@@ -1,0 +1,101 @@
+---
+- name: Query Rancher managed clusters
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      get clusters.management.cattle.io
+      -o json
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: rancher_clusters_raw
+  changed_when: false
+
+- name: Parse Rancher managed clusters
+  ansible.builtin.set_fact:
+    rancher_clusters: "{{ rancher_clusters_raw.stdout | from_json }}"
+
+- name: Build Rancher cluster lookup
+  ansible.builtin.set_fact:
+    rancher_cluster_lookup: >-
+      {{
+        rancher_cluster_lookup | default({}) |
+        combine({
+          item.spec.displayName: {
+            'name': item.metadata.name,
+            'driver': item.status.driver | default(''),
+            'connected': (
+              item.status.conditions
+              | selectattr('type', 'equalto', 'Connected')
+              | map(attribute='status')
+              | list
+              | first
+              | default('Unknown')
+            ),
+            'ready': (
+              item.status.conditions
+              | selectattr('type', 'equalto', 'Ready')
+              | map(attribute='status')
+              | list
+              | first
+              | default('Unknown')
+            )
+          }
+        })
+      }}
+  loop: "{{ rancher_clusters['items'] }}"
+
+- name: Display detected cluster lookup
+  ansible.builtin.debug:
+    var: rancher_cluster_lookup
+
+- name: Validate development cluster
+  ansible.builtin.assert:
+    that:
+      - rancher_cluster_lookup[rancher_dev_cluster_name] is defined
+      - rancher_cluster_lookup[rancher_dev_cluster_name].connected == "True"
+      - rancher_cluster_lookup[rancher_dev_cluster_name].ready == "True"
+    fail_msg: >-
+      Development cluster {{ rancher_dev_cluster_name }}
+      is missing, disconnected, or not ready in Rancher.
+    success_msg: >-
+      Development cluster {{ rancher_dev_cluster_name }}
+      is connected and ready.
+
+- name: Validate production cluster
+  ansible.builtin.assert:
+    that:
+      - rancher_cluster_lookup[rancher_prod_cluster_name] is defined
+      - rancher_cluster_lookup[rancher_prod_cluster_name].connected == "True"
+      - rancher_cluster_lookup[rancher_prod_cluster_name].ready == "True"
+    fail_msg: >-
+      Production cluster {{ rancher_prod_cluster_name }}
+      is missing, disconnected, or not ready in Rancher.
+    success_msg: >-
+      Production cluster {{ rancher_prod_cluster_name }}
+      is connected and ready.
+
+- name: Query Fleet downstream clusters
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      -n fleet-default
+      get clusters.fleet.cattle.io
+      -o json
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: fleet_clusters_raw
+  changed_when: false
+
+- name: Parse Fleet clusters
+  ansible.builtin.set_fact:
+    fleet_clusters: "{{ fleet_clusters_raw.stdout | from_json }}"
+
+- name: Validate Fleet downstream clusters
+  ansible.builtin.assert:
+    that:
+      - fleet_clusters['items'] | length >= 2
+    fail_msg: >-
+      Fleet does not currently report both downstream clusters.
+    success_msg: >-
+      Fleet reports {{ fleet_clusters['items'] | length }}
+      downstream clusters.

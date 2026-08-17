@@ -1,0 +1,165 @@
+---
+- name: Query Rancher managed clusters
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      get clusters.management.cattle.io
+      -o json
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: drift_rancher_raw
+  changed_when: false
+
+- name: Parse Rancher clusters
+  ansible.builtin.set_fact:
+    drift_rancher: "{{ drift_rancher_raw.stdout | from_json }}"
+
+- name: Build cluster health map
+  ansible.builtin.set_fact:
+    drift_cluster_map: >-
+      {{
+        drift_cluster_map | default({}) |
+        combine({
+          item.spec.displayName: {
+            'name': item.metadata.name,
+            'driver': item.status.driver | default(''),
+            'connected': (
+              item.status.conditions
+              | selectattr('type', 'equalto', 'Connected')
+              | map(attribute='status')
+              | list
+              | first
+              | default('Unknown')
+            ),
+            'ready': (
+              item.status.conditions
+              | selectattr('type', 'equalto', 'Ready')
+              | map(attribute='status')
+              | list
+              | first
+              | default('Unknown')
+            )
+          }
+        })
+      }}
+  loop: "{{ drift_rancher['items'] }}"
+  loop_control:
+    label: "{{ item.spec.displayName | default(item.metadata.name) }}"
+
+- name: Detect missing expected clusters
+  ansible.builtin.set_fact:
+    drift_missing_clusters: >-
+      {{
+        drift_expected_clusters
+        | difference(drift_cluster_map.keys() | list)
+      }}
+
+- name: Initialize unhealthy cluster list
+  ansible.builtin.set_fact:
+    drift_unhealthy_clusters: []
+
+- name: Detect unhealthy expected clusters
+  ansible.builtin.set_fact:
+    drift_unhealthy_clusters: >-
+      {{
+        drift_unhealthy_clusters + [item]
+      }}
+  loop: "{{ drift_expected_clusters }}"
+  when:
+    - item in drift_cluster_map
+    - drift_cluster_map[item].connected != drift_expected_status
+      or drift_cluster_map[item].ready != drift_expected_status
+
+- name: Build unhealthy cluster list from Rancher conditions
+  ansible.builtin.set_fact:
+    drift_unhealthy_clusters: >-
+      {{
+        drift_unhealthy_clusters | default([])
+        +
+        (
+          [item]
+          if (
+            drift_cluster_map[item].connected != drift_expected_status
+            or
+            drift_cluster_map[item].ready != drift_expected_status
+          )
+          else []
+        )
+      }}
+  loop: "{{ drift_expected_clusters }}"
+  when: item in drift_cluster_map
+
+- name: Query Fleet clusters
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      -n fleet-default
+      get clusters.fleet.cattle.io
+      -o json
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: drift_fleet_raw
+  changed_when: false
+
+- name: Parse Fleet clusters
+  ansible.builtin.set_fact:
+    drift_fleet: "{{ drift_fleet_raw.stdout | from_json }}"
+
+- name: Calculate Fleet count
+  ansible.builtin.set_fact:
+    drift_fleet_count: "{{ drift_fleet['items'] | length }}"
+
+- name: Determine Fleet drift
+  ansible.builtin.set_fact:
+    drift_fleet_drift: >-
+      {{
+        (drift_fleet_count | int)
+        != (drift_expected_fleet_clusters | int)
+      }}
+
+- name: Determine whether remediation is required
+  ansible.builtin.set_fact:
+    remediation_required: >-
+      {{
+        (drift_missing_clusters | length > 0)
+        or
+        (drift_unhealthy_clusters | length > 0)
+        or
+        (drift_fleet_drift | bool)
+      }}
+
+- name: Build remediation action
+  ansible.builtin.set_fact:
+    remediation_action: >-
+      {{
+        'NONE'
+        if not remediation_required
+        else 'INVESTIGATE_AND_RECONCILE'
+      }}
+
+- name: Display drift detection report
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "       KUBECLOUD DRIFT DETECTOR"
+      - "=============================================="
+      - "EXPECTED CLUSTERS : {{ drift_expected_clusters | join(', ') }}"
+      - "DETECTED CLUSTERS : {{ drift_cluster_map.keys() | list | join(', ') }}"
+      - "MISSING CLUSTERS  : {{ drift_missing_clusters | join(', ') | default('NONE', true) }}"
+      - "UNHEALTHY CLUSTERS: {{ drift_unhealthy_clusters | join(', ') | default('NONE', true) }}"
+      - "FLEET CLUSTERS    : {{ drift_fleet_count }}"
+      - "EXPECTED FLEET    : {{ drift_expected_fleet_clusters }}"
+      - "FLEET DRIFT       : {{ drift_fleet_drift }}"
+      - "REMEDIATION REQ.  : {{ remediation_required }}"
+      - "=============================================="
+
+- name: Display remediation action
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "           REMEDIATION PLAN"
+      - "=============================================="
+      - "Required : {{ remediation_required }}"
+      - "Action   : {{ remediation_action }}"
+      - "Mode     : {{ 'DRY-RUN' if remediation_dry_run else 'ACTIVE' }}"
+      - "=============================================="

@@ -1,0 +1,43 @@
+---
+- name: Display controlled drift simulation
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "       KUBECLOUD DRIFT SIMULATION"
+      - "=============================================="
+      - "Target cluster : {{ drift_simulation_cluster }}"
+      - "Simulation     : ENABLED"
+      - "=============================================="
+
+- name: Verify target cluster exists in Rancher
+  ansible.builtin.command:
+    cmd: >-
+      {{ kubectl_binary }}
+      get clusters.management.cattle.io
+      -o json
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: simulation_clusters
+  changed_when: false
+
+- name: Parse Rancher clusters
+  ansible.builtin.set_fact:
+    simulation_cluster_data: "{{ simulation_clusters.stdout | from_json }}"
+
+- name: Confirm target cluster exists
+  ansible.builtin.assert:
+    that:
+      - >-
+        simulation_cluster_data['items']
+        | selectattr('spec.displayName', 'equalto', drift_simulation_cluster)
+        | list
+        | length > 0
+    success_msg: "Target cluster {{ drift_simulation_cluster }} exists."
+    fail_msg: "Target cluster {{ drift_simulation_cluster }} was not found."
+
+- name: Display simulation instructions
+  ansible.builtin.debug:
+    msg:
+      - "Controlled drift simulation is ready."
+      - "The platform itself has NOT been modified."
+      - "Next step will simulate a policy/state mismatch safely."

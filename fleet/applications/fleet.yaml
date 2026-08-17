@@ -1,0 +1,6 @@
+defaultNamespace: default
+
+correctDrift:
+  enabled: true
+  force: false
+  keepFailHistory: false

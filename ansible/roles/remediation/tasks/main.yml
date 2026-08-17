@@ -1,78 +1,125 @@
 ---
-- name: Query Rancher managed clusters
-  ansible.builtin.command:
-    cmd: >-
-      {{ kubectl_binary }}
-      get clusters.management.cattle.io
-      -o json
-  environment:
-    KUBECONFIG: "{{ rancher_kubeconfig }}"
-  register: rancher_clusters_raw
-  changed_when: false
-
-- name: Parse Rancher clusters
-  ansible.builtin.set_fact:
-    rancher_clusters: "{{ rancher_clusters_raw.stdout | from_json }}"
-
-- name: Build cluster health state
-  ansible.builtin.set_fact:
-    remediation_clusters: >-
-      {{
-        remediation_clusters | default({}) |
-        combine({
-          item.spec.displayName: {
-            'name': item.metadata.name,
-            'connected': (
-              item.status.conditions
-              | selectattr('type', 'equalto', 'Connected')
-              | map(attribute='status')
-              | list
-              | first
-              | default('Unknown')
-            ),
-            'ready': (
-              item.status.conditions
-              | selectattr('type', 'equalto', 'Ready')
-              | map(attribute='status')
-              | list
-              | first
-              | default('Unknown')
-            )
-          }
-        })
-      }}
-  loop: "{{ rancher_clusters['items'] }}"
-  loop_control:
-    label: "{{ item.spec.displayName | default(item.metadata.name) }}"
-
-- name: Display current platform state
+- name: Display remediation engine status
   ansible.builtin.debug:
     msg:
       - "=============================================="
       - "       KUBECLOUD REMEDIATION ENGINE"
       - "=============================================="
-      - "DEV  connected : {{ remediation_clusters[rancher_dev_cluster_name].connected }}"
-      - "DEV  ready     : {{ remediation_clusters[rancher_dev_cluster_name].ready }}"
-      - "PROD connected : {{ remediation_clusters[rancher_prod_cluster_name].connected }}"
-      - "PROD ready     : {{ remediation_clusters[rancher_prod_cluster_name].ready }}"
+      - "Enabled : {{ remediation_enabled }}"
+      - "Mode    : {{ 'DRY-RUN' if remediation_dry_run else 'ACTIVE' }}"
       - "=============================================="
 
-- name: Determine whether remediation is required
+- name: Initialize remediation result
   ansible.builtin.set_fact:
-    remediation_required: >-
-      {{
-        remediation_clusters[rancher_dev_cluster_name].ready != "True"
-        or
-        remediation_clusters[rancher_prod_cluster_name].ready != "True"
-      }}
+    remediation_performed: false
+    remediation_actions: []
 
-- name: Display remediation decision
+- name: Stop remediation when no drift exists
   ansible.builtin.debug:
-    msg: >-
-      REMEDIATION REQUIRED: {{ remediation_required }}
-
-- name: Stop when platform is healthy
-  ansible.builtin.debug:
-    msg: "Platform is healthy. No remediation action required."
+    msg: "No drift detected. No remediation action required."
   when:
-    - not remediation_required
+    - not (remediation_required | default(false) | bool)
+
+- name: Validate detected label drift
+  ansible.builtin.assert:
+    that:
+      - item.key in remediation_allowed_label_keys
+      - item.cluster in drift_cluster_map
+    fail_msg: >-
+      Unsupported or invalid remediation target:
+      cluster={{ item.cluster }},
+      key={{ item.key }}.
+  loop: "{{ drift_label_mismatches | default([]) }}"
+  loop_control:
+    label: "{{ item.cluster }} / {{ item.key }}"
+  when:
+    - remediation_required | default(false) | bool
+    - (drift_label_mismatches | default([]) | length) > 0
+
+- name: Show planned label remediation
+  ansible.builtin.debug:
+    msg:
+      - "Cluster : {{ item.cluster }}"
+      - "Rancher object : {{ drift_cluster_map[item.cluster].name }}"
+      - "Label : {{ item.key }}"
+      - "Expected : {{ item.expected }}"
+      - "Actual : {{ item.actual }}"
+      - "Action : RESTORE"
+  loop: "{{ drift_label_mismatches | default([]) }}"
+  loop_control:
+    label: "{{ item.cluster }} / {{ item.key }}"
+  when:
+    - remediation_required | default(false) | bool
+    - (drift_label_mismatches | default([]) | length) > 0
+
+- name: Restore desired cluster labels
+  ansible.builtin.command:
+    argv:
+      - "{{ kubectl_binary }}"
+      - label
+      - "cluster.management.cattle.io"
+      - "{{ drift_cluster_map[item.cluster].name }}"
+      - "{{ item.key }}={{ item.expected }}"
+      - "--overwrite"
+  environment:
+    KUBECONFIG: "{{ rancher_kubeconfig }}"
+  register: remediation_label_result
+  changed_when: true
+  loop: "{{ drift_label_mismatches | default([]) }}"
+  loop_control:
+    label: "{{ item.cluster }} / {{ item.key }}"
+  when:
+    - remediation_enabled | bool
+    - not remediation_dry_run | bool
+    - remediation_required | default(false) | bool
+    - (drift_label_mismatches | default([]) | length) > 0
+
+- name: Record remediation actions
+  ansible.builtin.set_fact:
+    remediation_performed: true
+    remediation_actions: >-
+      {{
+        remediation_actions +
+        [{
+          'cluster': item.cluster,
+          'key': item.key,
+          'expected': item.expected,
+          'actual_before': item.actual,
+          'action': 'RESTORE_LABEL'
+        }]
+      }}
+  loop: "{{ drift_label_mismatches | default([]) }}"
+  loop_control:
+    label: "{{ item.cluster }} / {{ item.key }}"
+  when:
+    - remediation_enabled | bool
+    - not remediation_dry_run | bool
+    - remediation_required | default(false) | bool
+    - (drift_label_mismatches | default([]) | length) > 0
+
+- name: Reject unsupported automatic remediation
+  ansible.builtin.fail:
+    msg: >-
+      Drift was detected, but the current remediation engine only supports
+      policy label reconciliation. Missing clusters, unhealthy clusters,
+      and Fleet-count drift require a dedicated remediation strategy.
+  when:
+    - remediation_required | default(false) | bool
+    - (drift_label_mismatches | default([]) | length) == 0
+    - >
+      (drift_missing_clusters | default([]) | length > 0)
+      or
+      (drift_unhealthy_clusters | default([]) | length > 0)
+      or
+      (drift_fleet_drift | default(false) | bool)
+
+- name: Display remediation result
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "       KUBECLOUD REMEDIATION RESULT"
+      - "=============================================="
+      - "Drift before remediation : {{ remediation_required | default(false) }}"
+      - "Remediation mode         : {{ 'DRY-RUN' if remediation_dry_run else 'ACTIVE' }}"
+      - "Actions performed        : {{ remediation_actions | length }}"
+      - "=============================================="

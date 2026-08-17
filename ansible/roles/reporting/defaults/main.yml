@@ -3,5 +3,7 @@ report_output_dir: "/var/lib/kubecloud"
 report_filename: "platform-health.json"
 
 report_expected_score: 100
-
 report_include_timestamp: true
+
+rancher_dev_cluster_name: "kubecloud-dev"
+rancher_prod_cluster_name: "kubecloud-prod"

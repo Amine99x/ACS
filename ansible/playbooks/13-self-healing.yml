@@ -1,0 +1,48 @@
+---
+- name: KubeCloud Control Tower - Self Healing
+  hosts: management
+  become: true
+
+  environment:
+    PATH: "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin"
+    KUBECONFIG: "/etc/rancher/rke2/rke2.yaml"
+
+  vars:
+    remediation_dry_run: false
+
+  tasks:
+
+    - name: Initial drift detection
+      ansible.builtin.include_role:
+        name: drift_detection
+
+    - name: Active remediation
+      ansible.builtin.include_role:
+        name: remediation
+
+    - name: Re-run drift detection after remediation
+      ansible.builtin.include_role:
+        name: drift_detection
+
+    - name: Re-run health and compliance validation
+      ansible.builtin.include_role:
+        name: health_check
+
+    - name: Generate final platform report
+      ansible.builtin.include_role:
+        name: reporting
+
+    - name: Apply final Control Tower health gate
+      ansible.builtin.include_role:
+        name: platform_validation
+
+    - name: Display self-healing summary
+      ansible.builtin.debug:
+        msg:
+          - "=============================================="
+          - "       KUBECLOUD SELF-HEALING SUMMARY"
+          - "=============================================="
+          - "Remediation performed : {{ remediation_performed | default(false) }}"
+          - "Final drift detected  : {{ remediation_required | default(false) }}"
+          - "Final compliance      : {{ health_score | default(0) }}%"
+          - "=============================================="

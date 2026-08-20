@@ -1,0 +1,91 @@
+apiVersion: v1
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>KubeCloud Demo</title>
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          max-width: 900px;
+          margin: 50px auto;
+          padding: 20px;
+        }
+
+        .card {
+          border: 1px solid #ddd;
+          border-radius: 10px;
+          padding: 25px;
+          margin-top: 20px;
+        }
+
+        .healthy {
+          color: green;
+          font-weight: bold;
+        }
+
+        .unhealthy {
+          color: red;
+          font-weight: bold;
+        }
+      </style>
+    </head>
+
+    <body>
+
+      <h1>KubeCloud Demo Application</h1>
+
+      <div class="card">
+        <h2>3-Tier Application</h2>
+
+        <p>
+          Frontend → Backend API → PostgreSQL
+        </p>
+
+        <p>
+          Backend:
+          <span id="backend">Checking...</span>
+        </p>
+
+        <p>
+          Database:
+          <span id="database">Checking...</span>
+        </p>
+      </div>
+
+      <script>
+        async function checkStatus() {
+          try {
+            const response = await fetch("/api/status");
+            const data = await response.json();
+
+            document.getElementById("backend").textContent =
+              data.backend;
+
+            document.getElementById("database").textContent =
+              data.database;
+
+            document.getElementById("backend").className =
+              data.backend === "healthy" ? "healthy" : "unhealthy";
+
+            document.getElementById("database").className =
+              data.database === "healthy" ? "healthy" : "unhealthy";
+
+          } catch (error) {
+            document.getElementById("backend").textContent = "unreachable";
+            document.getElementById("database").textContent = "unknown";
+          }
+        }
+
+        checkStatus();
+      </script>
+
+    </body>
+    </html>
+kind: ConfigMap
+metadata:
+  name: kubecloud-demo-frontend-files
+  namespace: kubecloud-demo

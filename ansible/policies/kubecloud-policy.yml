@@ -1,19 +1,121 @@
 ---
 kubecloud_policy:
+
+  platform:
+    name: KubeCloud Control Tower
+    minimum_score: 100
+    expected_clusters: 2
+    auto_remediation: true
+    drift_detection: true
+    reporting: true
+
   clusters:
 
     kubecloud-dev:
+      required: true
       managed: true
       fleet: true
       monitoring: true
+
+      health:
+        connected: true
+        ready: true
+
+      distribution:
+        expected: k3s
+
       labels:
         environment: development
-        distribution: k3s
+
+      applications:
+
+        kubecloud-demo:
+          enabled: true
+          namespace: kubecloud-demo
+
+          components:
+
+            frontend:
+              type: deployment
+              expected_replicas: 2
+
+            backend:
+              type: deployment
+              expected_replicas: 2
+
+            postgres:
+              type: statefulset
+              expected_replicas: 1
+              persistent_storage: true
+
+          health_required: true
 
     kubecloud-prod:
+      required: true
       managed: true
       fleet: true
       monitoring: true
+
+      health:
+        connected: true
+        ready: true
+
+      distribution:
+        expected: kubeadm
+
       labels:
         environment: production
-        distribution: kubeadm
+
+      applications:
+
+        kubecloud-demo:
+          enabled: true
+          namespace: kubecloud-demo
+
+          components:
+
+            frontend:
+              type: deployment
+              expected_replicas: 2
+
+            backend:
+              type: deployment
+              expected_replicas: 2
+
+            postgres:
+              type: statefulset
+              expected_replicas: 1
+              persistent_storage: true
+
+          health_required: true
+
+  gitops:
+    required: true
+    branch: main
+    application_path: fleet/applications
+
+  remediation:
+
+    enabled: true
+
+    allowed:
+      - restore_cluster_labels
+
+    delegated:
+      - reconcile_fleet_applications
+
+    protected:
+      - delete_cluster
+      - rebuild_cluster
+      - destroy_namespace
+      - destroy_persistent_volume
+
+  monitoring:
+
+    prometheus: true
+    grafana: true
+    alertmanager: true
+
+    health_threshold:
+      platform: 100
+      application: 100

@@ -5,7 +5,7 @@ remediation_dry_run: true
 rancher_kubeconfig: "/etc/rancher/rke2/rke2.yaml"
 kubectl_binary: "/usr/local/bin/kubectl"
 
-# Only these policy attributes are currently safe for automatic reconciliation.
+# Safe platform-policy attributes currently supported for automatic remediation.
 remediation_allowed_label_keys:
   - environment
   - distribution

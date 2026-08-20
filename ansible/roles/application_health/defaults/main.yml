@@ -1,7 +1,18 @@
 ---
 application_namespace: "kubecloud-demo"
-application_name: "nginx"
-application_expected_replicas: 2
 
-application_dev_kubeconfig: "/etc/rancher/k3s/k3s.yaml"
-application_prod_kubeconfig: "/etc/kubernetes/admin.conf"
+application_components:
+  - name: frontend
+    kind: deployment
+    expected_replicas: 2
+
+  - name: backend
+    kind: deployment
+    expected_replicas: 2
+
+  - name: postgres
+    kind: statefulset
+    expected_replicas: 1
+
+application_check_pvc: true
+application_postgres_pvc_name: postgres-data

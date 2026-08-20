@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ANSIBLE_DIR="$PROJECT_ROOT/ansible"
+
+export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+
+usage() {
+    cat <<'HELP'
+
+KubeCloud Control Tower
+=======================
+
+Centralized automation, validation, drift detection,
+self-healing and reporting for the KubeCloud platform.
+
+Usage:
+  ./bin/kubecloudctl <command>
+
+Commands:
+  validate       Run complete platform validation
+  health         Check platform health and compliance
+  drift          Detect configuration/policy drift
+  heal           Detect and remediate supported drift
+  app-health     Validate DEV/PROD application health
+  report         Display the latest platform report
+  help           Show this help message
+
+Examples:
+  ./bin/kubecloudctl validate
+  ./bin/kubecloudctl health
+  ./bin/kubecloudctl drift
+  ./bin/kubecloudctl heal
+  ./bin/kubecloudctl app-health
+  ./bin/kubecloudctl report
+
+Architecture:
+  Ansible     -> Infrastructure and operational automation
+  Rancher     -> Centralized multi-cluster management
+  Fleet       -> GitOps application delivery
+  Policy      -> Desired state and governance
+  Monitoring  -> Prometheus / Grafana / Alertmanager
+
+HELP
+}
+
+require_ansible_dir() {
+    if [[ ! -d "$ANSIBLE_DIR" ]]; then
+        echo "ERROR: Ansible directory not found: $ANSIBLE_DIR" >&2
+        exit 1
+    fi
+}
+
+run_playbook() {
+    local playbook="$1"
+    shift
+
+    require_ansible_dir
+
+    cd "$ANSIBLE_DIR"
+
+    if [[ ! -f "$playbook" ]]; then
+        echo "ERROR: playbook not found: $playbook" >&2
+        exit 1
+    fi
+
+    ansible-playbook "$playbook" "$@"
+}
+
+case "${1:-help}" in
+
+    validate)
+        echo "=============================================="
+        echo " KUBECLOUD CONTROL TOWER - VALIDATION"
+        echo "=============================================="
+
+        run_playbook \
+            playbooks/16-control-tower-final-validation.yml \
+            -k -K
+        ;;
+
+    health)
+        echo "=============================================="
+        echo " KUBECLOUD CONTROL TOWER - HEALTH CHECK"
+        echo "=============================================="
+
+        run_playbook \
+            playbooks/08-health-check.yml \
+            -k -K \
+            --ask-vault-pass
+        ;;
+
+    drift)
+        echo "=============================================="
+        echo " KUBECLOUD CONTROL TOWER - DRIFT DETECTION"
+        echo "=============================================="
+
+        run_playbook \
+            playbooks/08-drift-detection.yml \
+            -k -K \
+            --ask-vault-pass
+        ;;
+
+    heal)
+        echo "=============================================="
+        echo " KUBECLOUD CONTROL TOWER - SELF HEALING"
+        echo "=============================================="
+
+        run_playbook \
+            playbooks/13-self-healing.yml \
+            -k -K
+        ;;
+
+    app-health)
+        echo "=============================================="
+        echo " KUBECLOUD CONTROL TOWER - APPLICATION HEALTH"
+        echo "=============================================="
+
+        run_playbook \
+            playbooks/15-application-health.yml \
+            -k -K
+        ;;
+
+    report)
+        REPORT_FILE="/var/lib/kubecloud/platform-health.json"
+
+        echo "=============================================="
+        echo " KUBECLOUD CONTROL TOWER - PLATFORM REPORT"
+        echo "=============================================="
+
+        if [[ ! -f "$REPORT_FILE" ]]; then
+            echo "ERROR: Report not found: $REPORT_FILE" >&2
+            echo
+            echo "Run:"
+            echo "  ./bin/kubecloudctl validate"
+            echo "or:"
+            echo "  ./bin/kubecloudctl heal"
+            exit 1
+        fi
+
+        sudo cat "$REPORT_FILE"
+        echo
+        ;;
+
+    help|-h|--help)
+        usage
+        ;;
+
+    *)
+        echo "ERROR: Unknown command: $1"
+        usage
+        exit 1
+        ;;
+
+esac

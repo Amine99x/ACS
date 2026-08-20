@@ -1,67 +1,257 @@
 ---
-- name: Check DEV NGINX deployment
+- name: Initialize application health results
+  ansible.builtin.set_fact:
+    application_dev_results: {}
+    application_prod_results: {}
+
+# ============================================================
+# DEV
+# ============================================================
+
+- name: Determine DEV kubectl command
+  ansible.builtin.set_fact:
+    application_dev_kubectl_command: >-
+      {{
+        ['/usr/local/bin/k3s', 'kubectl']
+        if hostvars['kubecloud-dev'].kubernetes_distribution == 'k3s'
+        else ['kubectl']
+      }}
+
+- name: Determine DEV kubeconfig
+  ansible.builtin.set_fact:
+    application_dev_kubeconfig: >-
+      {{
+        '/etc/rancher/k3s/k3s.yaml'
+        if hostvars['kubecloud-dev'].kubernetes_distribution == 'k3s'
+        else '/etc/kubernetes/admin.conf'
+      }}
+
+- name: Check DEV application components
+  ansible.builtin.command:
+    argv: >-
+      {{
+        application_dev_kubectl_command
+        +
+        [
+          '-n',
+          application_namespace,
+          'get',
+          item.kind,
+          item.name,
+          '-o',
+          (
+            'jsonpath={.status.availableReplicas}'
+            if item.kind == 'deployment'
+            else 'jsonpath={.status.readyReplicas}'
+          )
+        ]
+      }}
+  environment:
+    KUBECONFIG: "{{ application_dev_kubeconfig }}"
+  register: application_dev_component_checks
+  changed_when: false
+  failed_when: false
+  loop: "{{ application_components }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: kubecloud-dev
+  become: true
+
+- name: Build DEV application component status
+  ansible.builtin.set_fact:
+    application_dev_results: >-
+      {{
+        application_dev_results |
+        combine({
+          item.item.name: {
+            'kind': item.item.kind,
+            'expected': item.item.expected_replicas | int,
+            'actual': (item.stdout | default('0') | trim | int),
+            'healthy': (
+              item.rc == 0 and
+              (item.stdout | default('0') | trim | int)
+              >= (item.item.expected_replicas | int)
+            )
+          }
+        })
+      }}
+  loop: "{{ application_dev_component_checks.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# ============================================================
+# DEV PostgreSQL storage
+# ============================================================
+
+- name: Check DEV PostgreSQL PVC
   ansible.builtin.command:
     argv:
-      - /usr/local/bin/k3s
-      - kubectl
+      - "{{ application_dev_kubectl_command[0] }}"
+      - "{{ application_dev_kubectl_command[1] }}"
       - -n
       - "{{ application_namespace }}"
       - get
-      - deployment
-      - "{{ application_name }}"
+      - pvc
+      - "{{ application_postgres_pvc_name }}"
       - -o
-      - jsonpath={.status.availableReplicas}
+      - jsonpath={.status.phase}
   environment:
-    KUBECONFIG: "/etc/rancher/k3s/k3s.yaml"
-  register: application_dev_available
+    KUBECONFIG: "{{ application_dev_kubeconfig }}"
+  register: application_dev_pvc
   changed_when: false
   failed_when: false
   delegate_to: kubecloud-dev
   become: true
 
-- name: Check PROD NGINX deployment
+- name: Determine DEV PVC health
+  ansible.builtin.set_fact:
+    application_dev_pvc_healthy: >-
+      {{
+        application_dev_pvc.rc == 0 and
+        (application_dev_pvc.stdout | trim) == 'Bound'
+      }}
+
+# ============================================================
+# PROD
+# ============================================================
+
+- name: Determine PROD kubectl command
+  ansible.builtin.set_fact:
+    application_prod_kubectl_command: >-
+      {{
+        ['/usr/local/bin/k3s', 'kubectl']
+        if hostvars['kubecloud-prod'].kubernetes_distribution == 'k3s'
+        else ['kubectl']
+      }}
+
+- name: Determine PROD kubeconfig
+  ansible.builtin.set_fact:
+    application_prod_kubeconfig: >-
+      {{
+        '/etc/rancher/k3s/k3s.yaml'
+        if hostvars['kubecloud-prod'].kubernetes_distribution == 'k3s'
+        else '/etc/kubernetes/admin.conf'
+      }}
+
+- name: Check PROD application components
+  ansible.builtin.command:
+    argv: >-
+      {{
+        application_prod_kubectl_command
+        +
+        [
+          '-n',
+          application_namespace,
+          'get',
+          item.kind,
+          item.name,
+          '-o',
+          (
+            'jsonpath={.status.availableReplicas}'
+            if item.kind == 'deployment'
+            else 'jsonpath={.status.readyReplicas}'
+          )
+        ]
+      }}
+  environment:
+    KUBECONFIG: "{{ application_prod_kubeconfig }}"
+  register: application_prod_component_checks
+  changed_when: false
+  failed_when: false
+  loop: "{{ application_components }}"
+  loop_control:
+    label: "{{ item.name }}"
+  delegate_to: kubecloud-prod
+  become: true
+
+- name: Build PROD application component status
+  ansible.builtin.set_fact:
+    application_prod_results: >-
+      {{
+        application_prod_results |
+        combine({
+          item.item.name: {
+            'kind': item.item.kind,
+            'expected': item.item.expected_replicas | int,
+            'actual': (item.stdout | default('0') | trim | int),
+            'healthy': (
+              item.rc == 0 and
+              (item.stdout | default('0') | trim | int)
+              >= (item.item.expected_replicas | int)
+            )
+          }
+        })
+      }}
+  loop: "{{ application_prod_component_checks.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# ============================================================
+# PROD PostgreSQL storage
+# ============================================================
+
+- name: Check PROD PostgreSQL PVC
   ansible.builtin.command:
     argv:
-      - kubectl
+      - "{{ application_prod_kubectl_command[0] }}"
+      - "{{ application_prod_kubectl_command[1] }}"
       - -n
       - "{{ application_namespace }}"
       - get
-      - deployment
-      - "{{ application_name }}"
+      - pvc
+      - "{{ application_postgres_pvc_name }}"
       - -o
-      - jsonpath={.status.availableReplicas}
+      - jsonpath={.status.phase}
   environment:
-    KUBECONFIG: "/etc/kubernetes/admin.conf"
-  register: application_prod_available
+    KUBECONFIG: "{{ application_prod_kubeconfig }}"
+  register: application_prod_pvc
   changed_when: false
   failed_when: false
   delegate_to: kubecloud-prod
   become: true
 
-- name: Display raw application check results
-  ansible.builtin.debug:
-    msg:
-      - "DEV rc     : {{ application_dev_available.rc }}"
-      - "DEV stdout : '{{ application_dev_available.stdout | default('') }}'"
-      - "DEV stderr : '{{ application_dev_available.stderr | default('') }}'"
-      - "PROD rc     : {{ application_prod_available.rc }}"
-      - "PROD stdout : '{{ application_prod_available.stdout | default('') }}'"
-      - "PROD stderr : '{{ application_prod_available.stderr | default('') }}'"
+- name: Determine PROD PVC health
+  ansible.builtin.set_fact:
+    application_prod_pvc_healthy: >-
+      {{
+        application_prod_pvc.rc == 0 and
+        (application_prod_pvc.stdout | trim) == 'Bound'
+      }}
 
-- name: Determine application health
+# ============================================================
+# FINAL APPLICATION HEALTH
+# ============================================================
+
+- name: Determine DEV application health
   ansible.builtin.set_fact:
     application_dev_healthy: >-
       {{
-        application_dev_available.rc == 0 and
-        (application_dev_available.stdout | default('0') | trim | int)
-        >= (application_expected_replicas | int)
+        (application_dev_results | dict2items |
+         map(attribute='value.healthy') |
+         list |
+         select('equalto', true) |
+         list |
+         length)
+        ==
+        (application_components | length)
+        and
+        (application_dev_pvc_healthy | bool)
       }}
 
+- name: Determine PROD application health
+  ansible.builtin.set_fact:
     application_prod_healthy: >-
       {{
-        application_prod_available.rc == 0 and
-        (application_prod_available.stdout | default('0') | trim | int)
-        >= (application_expected_replicas | int)
+        (application_prod_results | dict2items |
+         map(attribute='value.healthy') |
+         list |
+         select('equalto', true) |
+         list |
+         length)
+        ==
+        (application_components | length)
+        and
+        (application_prod_pvc_healthy | bool)
       }}
 
 - name: Calculate application health score
@@ -75,15 +265,38 @@
         else 0
       }}
 
-- name: Display application health
+- name: Display DEV application health
   ansible.builtin.debug:
     msg:
       - "=============================================="
       - "       KUBECLOUD APPLICATION HEALTH"
+      - "       DEVELOPMENT"
       - "=============================================="
-      - "DEV NGINX  : {{ application_dev_available.stdout | default('0') | trim }}/{{ application_expected_replicas }}"
-      - "PROD NGINX : {{ application_prod_available.stdout | default('0') | trim }}/{{ application_expected_replicas }}"
-      - "DEV        : {{ 'HEALTHY' if application_dev_healthy else 'DEGRADED' }}"
-      - "PROD       : {{ 'HEALTHY' if application_prod_healthy else 'DEGRADED' }}"
-      - "APP SCORE  : {{ application_health_score }}%"
+      - "Frontend  : {{ application_dev_results.frontend.actual }}/{{ application_dev_results.frontend.expected }} {{ 'HEALTHY' if application_dev_results.frontend.healthy else 'DEGRADED' }}"
+      - "Backend   : {{ application_dev_results.backend.actual }}/{{ application_dev_results.backend.expected }} {{ 'HEALTHY' if application_dev_results.backend.healthy else 'DEGRADED' }}"
+      - "Postgres  : {{ application_dev_results.postgres.actual }}/{{ application_dev_results.postgres.expected }} {{ 'HEALTHY' if application_dev_results.postgres.healthy else 'DEGRADED' }}"
+      - "PVC       : {{ 'BOUND' if application_dev_pvc_healthy else 'NOT BOUND' }}"
+      - "STATUS    : {{ 'HEALTHY' if application_dev_healthy else 'DEGRADED' }}"
       - "=============================================="
+
+- name: Display PROD application health
+  ansible.builtin.debug:
+    msg:
+      - "=============================================="
+      - "       KUBECLOUD APPLICATION HEALTH"
+      - "       PRODUCTION"
+      - "=============================================="
+      - "Frontend  : {{ application_prod_results.frontend.actual }}/{{ application_prod_results.frontend.expected }} {{ 'HEALTHY' if application_prod_results.frontend.healthy else 'DEGRADED' }}"
+      - "Backend   : {{ application_prod_results.backend.actual }}/{{ application_prod_results.backend.expected }} {{ 'HEALTHY' if application_prod_results.backend.healthy else 'DEGRADED' }}"
+      - "Postgres  : {{ application_prod_results.postgres.actual }}/{{ application_prod_results.postgres.expected }} {{ 'HEALTHY' if application_prod_results.postgres.healthy else 'DEGRADED' }}"
+      - "PVC       : {{ 'BOUND' if application_prod_pvc_healthy else 'NOT BOUND' }}"
+      - "STATUS    : {{ 'HEALTHY' if application_prod_healthy else 'DEGRADED' }}"
+      - "=============================================="
+
+- name: Display application health summary
+  ansible.builtin.debug:
+    msg:
+      - "APPLICATION : kubecloud-demo"
+      - "DEV         : {{ 'HEALTHY' if application_dev_healthy else 'DEGRADED' }}"
+      - "PROD        : {{ 'HEALTHY' if application_prod_healthy else 'DEGRADED' }}"
+      - "APP SCORE   : {{ application_health_score }}%"

@@ -85,16 +85,20 @@
 
 - name: Check DEV PostgreSQL PVC
   ansible.builtin.command:
-    argv:
-      - "{{ application_dev_kubectl_command[0] }}"
-      - "{{ application_dev_kubectl_command[1] }}"
-      - -n
-      - "{{ application_namespace }}"
-      - get
-      - pvc
-      - "{{ application_postgres_pvc_name }}"
-      - -o
-      - jsonpath={.status.phase}
+    argv: >-
+      {{
+        application_dev_kubectl_command
+        +
+        [
+          '-n',
+          application_namespace,
+          'get',
+          'pvc',
+          application_postgres_pvc_name,
+          '-o',
+          'jsonpath={.status.phase}'
+        ]
+      }}
   environment:
     KUBECONFIG: "{{ application_dev_kubeconfig }}"
   register: application_dev_pvc
@@ -192,16 +196,20 @@
 
 - name: Check PROD PostgreSQL PVC
   ansible.builtin.command:
-    argv:
-      - "{{ application_prod_kubectl_command[0] }}"
-      - "{{ application_prod_kubectl_command[1] }}"
-      - -n
-      - "{{ application_namespace }}"
-      - get
-      - pvc
-      - "{{ application_postgres_pvc_name }}"
-      - -o
-      - jsonpath={.status.phase}
+    argv: >-
+      {{
+        application_prod_kubectl_command
+        +
+        [
+          '-n',
+          application_namespace,
+          'get',
+          'pvc',
+          application_postgres_pvc_name,
+          '-o',
+          'jsonpath={.status.phase}'
+        ]
+      }}
   environment:
     KUBECONFIG: "{{ application_prod_kubeconfig }}"
   register: application_prod_pvc

@@ -33,6 +33,10 @@ spec:
             - secretRef:
                 name: postgres-credentials
 
+          envFrom:
+            - secretRef:
+                name: postgres-credentials
+
           ports:
             - containerPort: 8000
 

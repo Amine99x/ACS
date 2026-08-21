@@ -8,17 +8,107 @@ data:
     import json
     import os
     import socket
+    import time
     from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    import psycopg
 
     DB_HOST = os.getenv("DB_HOST", "postgres")
     DB_PORT = int(os.getenv("DB_PORT", "5432"))
+    DB_NAME = os.getenv("POSTGRES_DB", "kubecloud")
+    DB_USER = os.getenv("POSTGRES_USER", "kubecloud")
+    DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "kubecloud-demo-password")
+
+
+    def get_connection():
+        return psycopg.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            connect_timeout=3,
+        )
+
+
+    def ensure_schema():
+        for _ in range(30):
+            try:
+                with get_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            CREATE TABLE IF NOT EXISTS messages (
+                                id SERIAL PRIMARY KEY,
+                                message TEXT NOT NULL,
+                                created_at TIMESTAMPTZ DEFAULT NOW()
+                            )
+                        """)
+                    conn.commit()
+
+                print("Database schema ready", flush=True)
+                return
+
+            except Exception as exc:
+                print(f"Waiting for PostgreSQL: {exc}", flush=True)
+                time.sleep(2)
+
+        raise RuntimeError("PostgreSQL did not become ready")
+
 
     def database_ready():
         try:
-            with socket.create_connection((DB_HOST, DB_PORT), timeout=2):
-                return True
-        except OSError:
+            with get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+            return True
+        except Exception:
             return False
+
+
+    def read_items():
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, message, created_at
+                    FROM messages
+                    ORDER BY id DESC
+                """)
+
+                rows = cur.fetchall()
+
+        return [
+            {
+                "id": row[0],
+                "message": row[1],
+                "created_at": row[2].isoformat()
+            }
+            for row in rows
+        ]
+
+
+    def create_item(message):
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO messages (message)
+                    VALUES (%s)
+                    RETURNING id, message, created_at
+                    """,
+                    (message,)
+                )
+
+                row = cur.fetchone()
+
+            conn.commit()
+
+        return {
+            "id": row[0],
+            "message": row[1],
+            "created_at": row[2].isoformat()
+        }
+
 
     class Handler(BaseHTTPRequestHandler):
 
@@ -31,7 +121,17 @@ data:
             self.end_headers()
             self.wfile.write(body)
 
+        def read_json(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length)
+
+            if not raw:
+                return {}
+
+            return json.loads(raw.decode())
+
         def do_GET(self):
+
             if self.path == "/api/health":
                 self.send_json(200, {
                     "status": "healthy"
@@ -51,12 +151,58 @@ data:
                 )
                 return
 
+            if self.path == "/api/items":
+                try:
+                    items = read_items()
+
+                    self.send_json(200, {
+                        "items": items
+                    })
+
+                except Exception as exc:
+                    self.send_json(500, {
+                        "error": str(exc)
+                    })
+
+                return
+
+            self.send_json(404, {
+                "error": "not found"
+            })
+
+        def do_POST(self):
+
+            if self.path == "/api/items":
+                try:
+                    payload = self.read_json()
+                    message = str(payload.get("message", "")).strip()
+
+                    if not message:
+                        self.send_json(400, {
+                            "error": "message is required"
+                        })
+                        return
+
+                    item = create_item(message)
+
+                    self.send_json(201, item)
+
+                except Exception as exc:
+                    self.send_json(500, {
+                        "error": str(exc)
+                    })
+
+                return
+
             self.send_json(404, {
                 "error": "not found"
             })
 
         def log_message(self, format, *args):
             return
+
+
+    ensure_schema()
 
     server = HTTPServer(("0.0.0.0", 8000), Handler)
     print("KubeCloud backend listening on port 8000", flush=True)

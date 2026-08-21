@@ -100,24 +100,6 @@
       !=
       kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-dev'].labels.environment
 
-- name: Compare development cluster distribution label
-  ansible.builtin.set_fact:
-    drift_label_mismatches: >-
-      {{
-        drift_label_mismatches + [{
-          'cluster': 'kubecloud-dev',
-          'key': 'distribution',
-          'expected': kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-dev'].labels.distribution,
-          'actual': drift_cluster_map['kubecloud-dev'].labels.distribution | default('MISSING')
-        }]
-      }}
-  when:
-    - "'kubecloud-dev' in drift_cluster_map"
-    - >
-      (drift_cluster_map['kubecloud-dev'].labels.distribution | default('MISSING'))
-      !=
-      kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-dev'].labels.distribution
-
 - name: Compare production cluster environment label
   ansible.builtin.set_fact:
     drift_label_mismatches: >-
@@ -135,24 +117,6 @@
       (drift_cluster_map['kubecloud-prod'].labels.environment | default('MISSING'))
       !=
       kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-prod'].labels.environment
-
-- name: Compare production cluster distribution label
-  ansible.builtin.set_fact:
-    drift_label_mismatches: >-
-      {{
-        drift_label_mismatches + [{
-          'cluster': 'kubecloud-prod',
-          'key': 'distribution',
-          'expected': kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-prod'].labels.distribution,
-          'actual': drift_cluster_map['kubecloud-prod'].labels.distribution | default('MISSING')
-        }]
-      }}
-  when:
-    - "'kubecloud-prod' in drift_cluster_map"
-    - >
-      (drift_cluster_map['kubecloud-prod'].labels.distribution | default('MISSING'))
-      !=
-      kubecloud_desired_policy.kubecloud_policy.clusters['kubecloud-prod'].labels.distribution
 
 # ------------------------------------------------------------
 # Fleet

@@ -5,7 +5,7 @@ kubecloud_policy:
     name: KubeCloud Control Tower
     minimum_score: 100
     expected_clusters: 2
-    auto_remediation: true
+    controlled_remediation: true
     drift_detection: true
     reporting: true
 
